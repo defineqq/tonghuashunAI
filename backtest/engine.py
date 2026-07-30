@@ -1,0 +1,129 @@
+"""
+回测引擎
+========
+
+给定：
+    - 策略函数 strategy(portfolio, universe, as_of) → (buys, sells)
+    - 时间区间 [start, end]
+    - 股票池 universe
+    - 初始现金 initial_cash
+
+引擎：
+    对每个交易日 t：
+    1. 收集所有相关股票 t 日的收盘价（会用到的：持仓 + 全池的候选）
+    2. 调用策略生成买卖信号
+    3. 调用 broker.execute_day 撮合
+    4. 每 N 天打印一次进度
+
+注意：为了让回测跑得动，评分时禁用 LLM（use_llm=False），情绪面统一 50。
+      如果要做"含 LLM 的回测"，成本极高（每天每股一次调用），暂不做。
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Callable, Iterable
+
+import pandas as pd
+
+from data_layer import market
+from paper_trade import portfolio as pfolio
+from paper_trade.broker import execute_day, FeeConfig
+from paper_trade.risk import RiskConfig
+
+
+def get_trading_days(start: str, end: str, ref_symbol: str = "600519") -> list[str]:
+    """
+    用一只主流股票的日线索引作为交易日历（AkShare 数据里非交易日不出现）。
+    """
+    df = market.daily(ref_symbol, start=start, end=end)
+    if df.empty:
+        return []
+    return [d.strftime("%Y-%m-%d") for d in df["date"].tolist()]
+
+
+def _load_close_prices(symbols: Iterable[str], date: str) -> dict[str, float]:
+    """加载指定日期各股票的收盘价（用缓存）。"""
+    result = {}
+    for s in symbols:
+        try:
+            df = market.daily(s, start="2018-01-01", end=date)
+            match = df[df["date"] <= pd.Timestamp(date)]
+            if not match.empty:
+                result[s] = float(match["close"].iloc[-1])
+        except Exception:
+            pass
+    return result
+
+
+def run(
+    strategy_fn: Callable,
+    universe: list[str],
+    start: str,
+    end: str,
+    initial_cash: float = 100_000.0,
+    strategy_kwargs: dict | None = None,
+    fee_cfg: FeeConfig | None = None,
+    risk_cfg: RiskConfig | None = None,
+    max_positions: int = 5,
+    progress_every: int = 10,
+) -> dict:
+    """
+    跑一段历史回测。
+
+    Args:
+        strategy_fn: 策略函数，签名 (portfolio, universe, as_of, **kwargs) → (buys, sells)
+        universe: 股票池
+        start / end: YYYY-MM-DD
+        strategy_kwargs: 传给策略的额外参数
+
+    Returns:
+        {
+          "portfolio": 最终账户,
+          "snapshots": DataFrame of 每日快照,
+          "metrics": dict,
+        }
+    """
+    strategy_kwargs = strategy_kwargs or {}
+    fee_cfg = fee_cfg or FeeConfig()
+    risk_cfg = risk_cfg or RiskConfig()
+
+    print(f"[backtest] 时间区间: {start} → {end}")
+    print(f"[backtest] 股票池: {len(universe)} 只")
+    print(f"[backtest] 初始资金: ¥{initial_cash:,.2f}")
+
+    trading_days = get_trading_days(start, end)
+    if not trading_days:
+        raise RuntimeError(f"无法获取 {start}~{end} 的交易日历")
+    print(f"[backtest] 交易日: {len(trading_days)}")
+
+    port = pfolio.Portfolio.new(account_id="backtest", initial_cash=initial_cash)
+
+    for i, date in enumerate(trading_days, 1):
+        buys, sells = strategy_fn(port, universe, as_of=date, **strategy_kwargs)
+
+        # 加载当日所有相关股票的收盘价
+        relevant = set(list(port.positions.keys()) + [b.symbol for b in buys])
+        close_prices = _load_close_prices(relevant, date)
+
+        execute_day(
+            port, date, close_prices,
+            buy_signals=buys, sell_signals=sells,
+            risk_cfg=risk_cfg, fee_cfg=fee_cfg,
+            max_positions=max_positions,
+        )
+
+        if i % progress_every == 0 or i == len(trading_days):
+            snap = port.daily_snapshots[-1]
+            print(f"  [{i}/{len(trading_days)}] {date}  总值 ¥{snap.total:,.0f}  PnL {snap.pnl_pct*100:+.2f}%  持仓 {snap.n_positions}")
+
+    # 汇总
+    from backtest.metrics import summarize
+    snapshots = pd.DataFrame([{
+        "date": s.date, "cash": s.cash, "positions_value": s.positions_value,
+        "total": s.total, "pnl_pct": s.pnl_pct, "n_positions": s.n_positions,
+    } for s in port.daily_snapshots])
+    metrics = summarize(snapshots)
+
+    return {"portfolio": port, "snapshots": snapshots, "metrics": metrics}

@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>tonghuashunAI · 控制台</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@11.1.0/marked.min.js"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+    pre { white-space: pre-wrap; word-break: break-all; }
+    .prose h1 { font-size: 1.5rem; font-weight: 700; margin: 1rem 0; }
+    .prose h2 { font-size: 1.25rem; font-weight: 700; margin: 0.75rem 0; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.25rem; }
+    .prose h3 { font-size: 1.1rem; font-weight: 600; margin: 0.5rem 0; }
+    .prose p, .prose li { margin: 0.5rem 0; line-height: 1.6; }
+    .prose ul, .prose ol { margin-left: 1.5rem; }
+    .prose table { border-collapse: collapse; margin: 0.5rem 0; }
+    .prose th, .prose td { border: 1px solid #d1d5db; padding: 0.25rem 0.5rem; }
+    .prose th { background: #f3f4f6; font-weight: 600; }
+    .prose code { background: #f3f4f6; padding: 0.1rem 0.3rem; border-radius: 3px; font-size: 0.9em; }
+    .tab-btn.active { color: #2563eb; border-bottom-color: #2563eb; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+
+<header class="bg-white border-b border-slate-200 shadow-sm">
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div>
+      <h1 class="text-xl font-bold text-slate-800">🤖 tonghuashunAI</h1>
+      <p class="text-xs text-slate-500">A 股 AI 量化分析 · 浏览器控制台</p>
+    </div>
+    <div class="flex items-center gap-3 text-sm">
+      <span id="status-badge" class="px-2 py-1 rounded bg-slate-100 text-slate-500">检查中...</span>
+      <a href="/docs" target="_blank" class="text-blue-600 hover:underline">API 文档</a>
+    </div>
+  </div>
+  <nav class="max-w-7xl mx-auto px-6 flex gap-6 border-t border-slate-100">
+    <button class="tab-btn active py-2 border-b-2 border-transparent text-sm" data-tab="dashboard">📊 概览</button>
+    <button class="tab-btn py-2 border-b-2 border-transparent text-sm" data-tab="score">🎯 评分</button>
+    <button class="tab-btn py-2 border-b-2 border-transparent text-sm" data-tab="report">📰 每日报告</button>
+    <button class="tab-btn py-2 border-b-2 border-transparent text-sm" data-tab="portfolio">💼 假想账户</button>
+    <button class="tab-btn py-2 border-b-2 border-transparent text-sm" data-tab="backtest">📈 回测</button>
+    <button class="tab-btn py-2 border-b-2 border-transparent text-sm" data-tab="qbot">🧰 Qbot 集成</button>
+    <button class="tab-btn py-2 border-b-2 border-transparent text-sm" data-tab="notify">🔔 通知</button>
+  </nav>
+</header>
+
+<main class="max-w-7xl mx-auto p-6">
+
+  <!-- 概览 -->
+  <section id="tab-dashboard" class="tab-panel">
+    <h2 class="text-lg font-bold mb-4">系统状态</h2>
+    <div id="status-cards" class="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div class="p-4 bg-white rounded-lg shadow-sm"><div class="text-xs text-slate-500">LLM</div><div id="s-llm" class="text-lg font-semibold mt-1">-</div></div>
+      <div class="p-4 bg-white rounded-lg shadow-sm"><div class="text-xs text-slate-500">飞书</div><div id="s-feishu" class="text-lg font-semibold mt-1">-</div></div>
+      <div class="p-4 bg-white rounded-lg shadow-sm"><div class="text-xs text-slate-500">钉钉</div><div id="s-dingtalk" class="text-lg font-semibold mt-1">-</div></div>
+      <div class="p-4 bg-white rounded-lg shadow-sm"><div class="text-xs text-slate-500">邮件</div><div id="s-email" class="text-lg font-semibold mt-1">-</div></div>
+    </div>
+
+    <h2 class="text-lg font-bold mt-8 mb-4">快速开始</h2>
+    <div class="bg-white rounded-lg shadow-sm p-6 space-y-4 text-sm text-slate-700">
+      <div><b>1.</b> 打开 <b>🎯 评分</b>：输入股票代码看四维评分</div>
+      <div><b>2.</b> 打开 <b>📰 每日报告</b>：一键生成大盘情绪 + Top N 个股报告</div>
+      <div><b>3.</b> 打开 <b>💼 假想账户</b>：跑一次模拟撮合，跟踪 PnL</div>
+      <div><b>4.</b> 打开 <b>📈 回测</b>：验证 swing_v1 策略历史表现</div>
+      <div><b>5.</b> 打开 <b>🧰 Qbot 集成</b>：浏览 Qbot 的 20+ 内置策略源码 + 文档</div>
+      <div><b>6.</b> 打开 <b>🔔 通知</b>：测试消息推送</div>
+    </div>
+  </section>
+
+  <!-- 评分 -->
+  <section id="tab-score" class="tab-panel hidden">
+    <h2 class="text-lg font-bold mb-4">股票评分</h2>
+    <div class="bg-white rounded-lg shadow-sm p-6">
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+        <input id="score-symbol" placeholder="股票代码 如 600519" class="col-span-2 border border-slate-300 rounded px-3 py-2">
+        <input id="score-asof" type="date" class="border border-slate-300 rounded px-3 py-2">
+        <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="score-llm" checked> 使用 LLM</label>
+      </div>
+      <button onclick="doScore()" class="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">开始评分</button>
+      <div id="score-result" class="mt-6 hidden">
+        <div class="text-center mb-6">
+          <div class="text-5xl font-bold text-blue-600" id="score-total">-</div>
+          <div class="text-sm text-slate-500 mt-1">综合评分 (0-100)</div>
+        </div>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div class="p-3 border rounded"><div class="text-xs text-slate-500">技术面</div><div class="text-xl font-semibold" id="score-tech">-</div></div>
+          <div class="p-3 border rounded"><div class="text-xs text-slate-500">基本面</div><div class="text-xl font-semibold" id="score-fund">-</div></div>
+          <div class="p-3 border rounded"><div class="text-xs text-slate-500">情绪面</div><div class="text-xl font-semibold" id="score-sent">-</div></div>
+          <div class="p-3 border rounded"><div class="text-xs text-slate-500">资金面</div><div class="text-xl font-semibold" id="score-money">-</div></div>
+        </div>
+        <details class="mt-4 text-xs">
+          <summary class="cursor-pointer text-slate-500">明细 JSON</summary>
+          <pre id="score-detail" class="mt-2 p-3 bg-slate-50 rounded"></pre>
+        </details>
+      </div>
+    </div>
+
+    <h2 class="text-lg font-bold mt-8 mb-4">批量排名</h2>
+    <div class="bg-white rounded-lg shadow-sm p-6">
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+        <select id="rank-pool" class="border border-slate-300 rounded px-3 py-2">
+          <option value="000300">沪深 300</option>
+          <option value="000905">中证 500</option>
+          <option value="000852">中证 1000</option>
+        </select>
+        <input id="rank-limit" type="number" value="30" class="border border-slate-300 rounded px-3 py-2" placeholder="池大小">
+        <input id="rank-topn" type="number" value="10" class="border border-slate-300 rounded px-3 py-2" placeholder="Top N">
+        <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="rank-llm"> 使用 LLM（慢）</label>
+      </div>
+      <button onclick="doRank()" class="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">生成排名</button>
+      <div id="rank-status" class="text-sm text-slate-500 mt-3"></div>
+      <div id="rank-result" class="mt-4 overflow-x-auto"></div>
+    </div>
+  </section>
+
+  <!-- 每日报告 -->
+  <section id="tab-report" class="tab-panel hidden">
+    <h2 class="text-lg font-bold mb-4">每日选股分析报告</h2>
+    <div class="bg-white rounded-lg shadow-sm p-6">
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <input id="report-symbols" placeholder="股票代码，逗号分隔（留空用配置池）" class="col-span-2 border border-slate-300 rounded px-3 py-2">
+        <input id="report-topn" type="number" value="10" class="border border-slate-300 rounded px-3 py-2">
+      </div>
+      <div class="flex gap-2 mt-3">
+        <button onclick="genReport()" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">生成报告</button>
+        <button onclick="loadReportList()" class="px-4 py-2 bg-slate-200 text-slate-700 rounded hover:bg-slate-300">查看历史</button>
+      </div>
+      <div id="report-status" class="text-sm text-slate-500 mt-2"></div>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mt-6">
+      <div class="bg-white rounded-lg shadow-sm p-4 md:col-span-1">
+        <div class="text-sm font-semibold mb-2">历史报告</div>
+        <ul id="report-list" class="text-sm space-y-1 max-h-96 overflow-y-auto"></ul>
+      </div>
+      <div class="bg-white rounded-lg shadow-sm p-6 md:col-span-3">
+        <div id="report-view" class="prose text-sm">
+          点击"生成报告"或"查看历史"...
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 假想账户 -->
+  <section id="tab-portfolio" class="tab-panel hidden">
+    <h2 class="text-lg font-bold mb-4">假想账户</h2>
+    <div class="bg-white rounded-lg shadow-sm p-6">
+      <div class="flex gap-2 mb-4">
+        <input id="acct-name" placeholder="账户名 如 swing_v1" class="border border-slate-300 rounded px-3 py-2">
+        <input id="acct-cash" type="number" value="100000" class="border border-slate-300 rounded px-3 py-2">
+        <button onclick="loadAccount()" class="px-4 py-2 bg-slate-200 rounded">查看</button>
+        <button onclick="newAccount()" class="px-4 py-2 bg-emerald-600 text-white rounded">新建</button>
+        <button onclick="runPaper()" class="px-4 py-2 bg-blue-600 text-white rounded">跑一次撮合</button>
+      </div>
+      <div id="acct-view" class="text-sm text-slate-500">选择或新建一个账户...</div>
+    </div>
+  </section>
+
+  <!-- 回测 -->
+  <section id="tab-backtest" class="tab-panel hidden">
+    <h2 class="text-lg font-bold mb-4">历史回测（swing_v1）</h2>
+    <div class="bg-white rounded-lg shadow-sm p-6">
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <input id="bt-start" type="date" class="border border-slate-300 rounded px-3 py-2">
+        <input id="bt-end" type="date" class="border border-slate-300 rounded px-3 py-2">
+        <select id="bt-pool" class="border border-slate-300 rounded px-3 py-2">
+          <option value="000300">沪深 300</option>
+          <option value="000905">中证 500</option>
+        </select>
+        <input id="bt-limit" type="number" value="20" class="border border-slate-300 rounded px-3 py-2" placeholder="池大小">
+      </div>
+      <button onclick="runBacktest()" class="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">开始回测</button>
+      <div id="bt-status" class="text-sm text-slate-500 mt-3"></div>
+
+      <div id="bt-result" class="hidden mt-6">
+        <div id="bt-metrics" class="grid grid-cols-2 md:grid-cols-4 gap-3"></div>
+        <canvas id="bt-chart" class="mt-6" height="120"></canvas>
+      </div>
+    </div>
+  </section>
+
+  <!-- Qbot 集成 -->
+  <section id="tab-qbot" class="tab-panel hidden">
+    <h2 class="text-lg font-bold mb-4">Qbot 内置策略</h2>
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+      <div class="bg-white rounded-lg shadow-sm p-4">
+        <div class="text-sm font-semibold mb-2">策略列表</div>
+        <ul id="qbot-strategy-list" class="text-sm space-y-1 max-h-96 overflow-y-auto"></ul>
+      </div>
+      <div class="bg-white rounded-lg shadow-sm p-6 md:col-span-3">
+        <pre id="qbot-strategy-src" class="text-xs bg-slate-50 p-4 rounded max-h-[600px] overflow-auto">选择一个策略查看源码...</pre>
+      </div>
+    </div>
+
+    <h2 class="text-lg font-bold mt-8 mb-4">Qbot 文档</h2>
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+      <div class="bg-white rounded-lg shadow-sm p-4">
+        <div class="text-sm font-semibold mb-2">文档列表</div>
+        <ul id="qbot-doc-list" class="text-sm space-y-1 max-h-96 overflow-y-auto"></ul>
+      </div>
+      <div class="bg-white rounded-lg shadow-sm p-6 md:col-span-3">
+        <div id="qbot-doc-view" class="prose text-sm">选择一份文档...</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 通知 -->
+  <section id="tab-notify" class="tab-panel hidden">
+    <h2 class="text-lg font-bold mb-4">通知测试</h2>
+    <div class="bg-white rounded-lg shadow-sm p-6">
+      <input id="notify-title" placeholder="标题" value="tonghuashunAI 测试通知" class="w-full border border-slate-300 rounded px-3 py-2">
+      <textarea id="notify-text" rows="4" class="mt-3 w-full border border-slate-300 rounded px-3 py-2">这是一条测试消息，若收到说明通知渠道配置成功。</textarea>
+      <button onclick="testNotify()" class="mt-3 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">发送测试</button>
+      <div id="notify-result" class="mt-4 text-sm"></div>
+    </div>
+  </section>
+
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

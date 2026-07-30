@@ -1,33 +1,106 @@
 # CHANGELOG
 
-## 快速总览（2026-07-30 一夜进度）
+## 全景总览
 
-用户睡前授权按推荐方案自主推进。一晚完成 **M0 → M2** 五个里程碑：
+| # | 里程碑 | 关键产出 | 状态 |
+|---|---|---|:---:|
+| M0 | 初始化仓库 + Qbot 底座 | 目录骨架、`.gitignore`、`hello_qbot.py` | ✅ |
+| M0.5 | Qbot 从 submodule 转为本地副本 | `vendor/Qbot/` 精简到 77MB、`NOTICE.md` | ✅ |
+| M1 | 数据层 | `data_layer/` 5 模块 + parquet 缓存 | ✅ |
+| M1.5 | 三维评分器 | `analysis/` 4 模块 + `rank_hs300.py` | ✅ |
+| M2 | LLM 情绪分析层 | `ai_analysis/` 4 模块 + `daily_report.py` | ✅ |
+| M3 | 本地模拟撮合 | `paper_trade/` 3 模块 + 假想账户 JSON 持久化 | ✅ |
+| M3.5 | swing_v1 波段策略 | `my_strategies/swing_v1.py` | ✅ |
+| M4 | 历史回测框架 | `backtest/` 3 模块 + Markdown/CSV/PNG 报告 | ✅ |
+| M5 | 通知推送 + 一键调度 | `notify/` 4 通道 + `scripts/daily.sh` | ✅ |
+| M6 | Web 控制台 | FastAPI + 单页 HTML，融合 Qbot 策略浏览 | ✅ |
 
-| # | 里程碑 | 状态 | 关键产出 |
-|---|--------|:----:|---------|
-| M0 | 初始化仓库 + Qbot 底座（submodule） | ✅ | 目录骨架、`.gitignore`、`README`、`hello_qbot.py` |
-| M0.5 | Qbot 从 submodule 转为本地副本（防上游停更） | ✅ | `vendor/Qbot/` 精简到 77MB、`NOTICE.md` |
-| M1 | 数据层（AkShare 封装 + parquet 缓存） | ✅ | `data_layer/` 5 模块 + 缓存装饰器 |
-| M1.5 | 三维度评分器（技术/基本/资金） | ✅ | `analysis/` 4 模块 + `rank_hs300.py` |
-| M2 | LLM 情绪分析层（Claude/DeepSeek/OpenAI + stub 兜底） | ✅ | `ai_analysis/` 4 模块 + `daily_report.py` |
+**测试**：pytest 28/28 全绿。
 
-**验证**：pytest 11/11 全绿（不需要外部 API 就能跑）。
-**Commits**：6 次 commit，全部已 push 到 `defineqq/tonghuashunAI`。
+## 2026-07-30
 
-### 早上起床看这里 👇
+### 🔒 安全事件与处理
 
-1. **看整体**：直接读 [README.md](./README.md)，是完整的项目手册
-2. **看进度**：读下面 M0/M0.5/M1/M1.5/M2 的详细决策记录
-3. **想立刻跑**：
-   ```bash
-   cd /home/gem/tonghuashunAI
-   python3.9 -m venv .venv && source .venv/bin/activate
-   pip install -r vendor/Qbot/requirements.txt -r requirements.txt
-   python examples/hello_qbot.py             # 拉贵州茅台数据+回测
-   python examples/daily_report_demo.py --symbols 600519 000858 300750
-   ```
-4. **要接真实 LLM**：把 `.env.example` 拷成 `.env`，填一个 API key（推荐 DeepSeek，便宜）
+发现 Qbot 上游源码里硬编码了 3 处真实的 GitHub token（不是我们的，是 Qbot 作者的）：
+- `vendor/Qbot/utils/pull_issues.py`
+- `vendor/Qbot/utils/sendemail_stargazers.py`
+- `vendor/Qbot/docs/index.html`
+
+**处理**：
+1. 工作树替换成 `REDACTED_PLEASE_SET_YOUR_OWN_TOKEN` 占位符
+2. 用 `git-filter-repo` **重写整个历史**，把 2 个 ghp_ token 全部替换为 `REDACTED_QBOT_UPSTREAM_LEAKED_TOKEN`
+3. `git push origin main --force` 覆盖远端历史（这是转 public 的前置条件）
+4. 副作用：M0.5、M0 commit 的 hash 变了，早期 push 记录已被清除
+
+### M6：Web 控制台 ✅
+
+- FastAPI 后端 `web/server.py` + 路由 `web/api/routes.py`（25 个 endpoint）
+- 单页前端 `web/static/index.html`（Tailwind CDN + Chart.js CDN + marked CDN），零 npm 构建
+- 功能面板：概览 / 评分 / 每日报告 / 假想账户 / 回测 / Qbot 集成 / 通知
+- Qbot 融合方式：不用它的 wxPython GUI（桌面应用不方便嵌浏览器），改为**通过 API 浏览 Qbot 所有内置策略源码 + 完整文档**
+- 一键启动：`python examples/run_web.py` → http://127.0.0.1:8000
+
+### M5：通知 + 一键调度 ✅
+
+- `notify/` 4 个渠道：飞书 / 钉钉 / 企业微信 / SMTP 邮件（都走 webhook 或 SMTP，不需要客户端）
+- 未配置的渠道静默跳过，不 crash
+- `notify.dispatch.notify(title, text)` 统一入口
+- `scripts/daily.sh` 每日一键：生成报告 → 模拟撮合 → 通知推送 → GitHub 同步
+- crontab 建议：`30 15 * * 1-5`（每交易日 15:30 后跑）
+
+### M4：历史回测 + 报告 ✅
+
+- `backtest/engine.py`：逐日撮合引擎，产出账户曲线
+- `backtest/metrics.py`：年化 / 累计 / 最大回撤 / 夏普 / 波动率
+- `backtest/report.py`：Markdown + CSV + PNG（matplotlib 可选）
+- `examples/backtest_swing_v1.py`：一键跑历史回测
+
+**注意**：回测里强制 `use_llm=False`（每股每天调 LLM 成本太高），情绪面用中性 50。想含 LLM 回测可以自己开，但要预算好 token 费。
+
+### M3.5：swing_v1 波段策略 ✅
+
+- 综合评分 ≥ min_score（默认 65）的进入候选
+- 已持仓不加仓
+- 卖出全交给风控（止损/止盈/到期）
+- 单只最大 18% 仓位，最多同时持有 5 只
+
+### M3：本地模拟撮合 + 假想账户 ✅
+
+- `paper_trade/portfolio.py`：账户/持仓/成交/快照，JSON 持久化到 `logs/portfolio/{account}.json`
+- `paper_trade/broker.py`：日度撮合，覆盖手续费 / 印花税 / 过户费 / 滑点
+- `paper_trade/risk.py`：止损（-5%）/ 止盈（+15% 减半）/ 最长持有（10 天）
+- `execute_day()` 是核心入口：mark to market → 风控卖 → 策略卖 → 策略买 → 快照
+
+### M2：LLM 情绪分析层 ✅
+
+- `llm_client.py`：统一 LLM 接口，无 key 自动 stub（返回中性）
+- `stock_scorer.py`：个股情绪评分
+- `news_scorer.py`：大盘情绪评分
+- `daily_report.py`：生成每日 Markdown 报告
+- Provider 优先级：Claude > DeepSeek > OpenAI，可用 `LLM_PROVIDER` 覆盖
+
+### M1.5：三维评分器 ✅
+
+- 技术面（5 子项）/ 基本面（3 子项）/ 资金面（3 子项）
+- 所有子项都是**相对分位**打分，避免绝对值失效
+- `analysis/scorer.py` 按 YAML 权重合并
+
+### M1：数据层 ✅
+
+- `data_layer/` 5 模块：market / fundamental / moneyflow / sentiment / universe
+- `cache.py`：md5 参数指纹 + parquet 装饰器
+- 历史数据永久缓存，近期数据 0.1–6h 短时缓存
+
+### M0.5：Qbot 从 submodule 转为本地副本 ✅
+
+- 移除 submodule 关联，源码直接纳入 `vendor/Qbot/`
+- 精简：686 MB → 77 MB
+- `NOTICE.md` 说明 MIT 合规
+
+### M0：仓库初始化 ✅
+
+- `defineqq/tonghuashunAI` GitHub 私有仓库
+- Python 3.9 + AkShare + backtrader + Qbot 依赖链
 5. **想继续做**：下一站是 **M3 本地模拟撮合**（每日盘前跑、假想账户跟 PnL），预计半天左右
 
 ---
