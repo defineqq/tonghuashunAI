@@ -27,9 +27,12 @@ def _load_weights(config_path: str | Path = "configs/strategy.yaml") -> dict:
     return cfg["swing_v1"]["weights"]
 
 
-def score_one(symbol: str, as_of: str | None = None, weights: dict | None = None) -> dict:
+def score_one(symbol: str, as_of: str | None = None, weights: dict | None = None, use_llm: bool = True) -> dict:
     """
-    对单只股票打四维度评分。sentiment 维度暂返回 50（中性），M2 阶段接入 LLM 后启用。
+    对单只股票打四维度评分。
+
+    Args:
+        use_llm: True 且已配置 LLM key 时，用 LLM 打情绪分；否则退化为中性 50。
     """
     weights = weights or _load_weights()
     as_of = as_of or datetime.now().strftime("%Y-%m-%d")
@@ -37,7 +40,19 @@ def score_one(symbol: str, as_of: str | None = None, weights: dict | None = None
     tech = technical.score(symbol, as_of=as_of, with_detail=True)
     fund = fundamental_score.score(symbol, as_of=as_of, with_detail=True)
     money = moneyflow_score.score(symbol, as_of=as_of, with_detail=True)
-    sent_total = 50.0  # M2 阶段填充
+
+    if use_llm:
+        try:
+            from ai_analysis import stock_scorer  # 惰性 import，测试不依赖
+            sent = stock_scorer.score(symbol, as_of=as_of, with_detail=True)
+            sent_total = sent["total"]
+            sent_sub = sent
+        except Exception as e:
+            sent_total = 50.0
+            sent_sub = {"total": 50.0, "reason": f"LLM 评分失败: {e}", "provider": "stub"}
+    else:
+        sent_total = 50.0
+        sent_sub = {"total": 50.0, "reason": "use_llm=False", "provider": "stub"}
 
     total = (
         tech["total"] * weights["technical"]
@@ -58,6 +73,7 @@ def score_one(symbol: str, as_of: str | None = None, weights: dict | None = None
             "technical": tech["sub"],
             "fundamental": fund["sub"],
             "moneyflow": money["sub"],
+            "sentiment": sent_sub,
         },
     }
 
@@ -66,10 +82,14 @@ def rank_universe(
     symbols: list[str],
     as_of: str | None = None,
     top_n: int | None = None,
+    use_llm: bool = True,
     verbose: bool = False,
 ) -> pd.DataFrame:
     """
     对一组股票打分并排序。
+
+    Args:
+        use_llm: 是否用 LLM 打情绪分。False 时跳过（跑几百只时更快）。
 
     Returns:
         DataFrame，按 total 降序，包含 symbol, total, technical, fundamental, sentiment, moneyflow 列。
@@ -80,7 +100,7 @@ def rank_universe(
         if verbose:
             print(f"[{i}/{len(symbols)}] scoring {sym}...")
         try:
-            r = score_one(sym, as_of=as_of, weights=weights)
+            r = score_one(sym, as_of=as_of, weights=weights, use_llm=use_llm)
             rows.append({k: v for k, v in r.items() if k != "detail"})
         except Exception as e:
             if verbose:

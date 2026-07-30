@@ -29,6 +29,7 @@ def main():
     p.add_argument("--top", type=int, default=10)
     p.add_argument("--as-of", default=None, help="截止日期 YYYY-MM-DD, 默认今天")
     p.add_argument("--limit", type=int, default=None, help="调试用：只跑池子的前 N 只")
+    p.add_argument("--no-llm", action="store_true", help="跳过 LLM 情绪评分（更快，但情绪维度全部 50）")
     args = p.parse_args()
 
     # 加载股票池
@@ -48,7 +49,7 @@ def main():
         symbols = symbols[: args.limit]
 
     print(f"股票池: {args.pool} 共 {len(symbols)} 只，开始打分...")
-    top = rank_universe(symbols, as_of=args.as_of, top_n=args.top, verbose=True)
+    top = rank_universe(symbols, as_of=args.as_of, top_n=args.top, use_llm=not args.no_llm, verbose=True)
 
     print("\n===== 综合评分 Top {} =====".format(args.top))
     print(top.to_string(index=False))

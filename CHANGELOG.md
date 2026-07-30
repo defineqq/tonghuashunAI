@@ -2,6 +2,31 @@
 
 ## 2026-07-30
 
+### M2：LLM 情绪分析层 ✅
+
+**做了什么**
+- 新增 `ai_analysis/` Python 包
+  - `llm_client.py`：统一 LLM 调用接口，支持 Claude / OpenAI / DeepSeek，**无 API key 时自动 stub**（返回中性评分），下游流程始终能跑
+  - `stock_scorer.py`：用 LLM 分析个股公告，输出情绪评分（0-100）+ 利好利空要点 + 风险提示
+  - `news_scorer.py`：分析财联社电报，输出大盘情绪评分 + 热点/承压板块 + 关键事件
+  - `daily_report.py`：组合大盘情绪 + Top N 个股，生成 Markdown 每日报告
+  - `prompts/`：`stock_sentiment.md`、`market_sentiment.md` Prompt 模板
+- `analysis/scorer.py`：把情绪面接入 LLM 评分，加 `use_llm` 开关（False 时跳过，跑大池子更快）
+- 新增 `examples/daily_report_demo.py`：一键生成完整每日报告
+- 新增 `pytest.ini`：只收集自研测试，排除 vendor/Qbot 里需要 tushare token 的测试
+- 单元测试：`ai_analysis/tests/test_llm_client.py`（4 个用例，全跑 stub 分支）
+- pytest 全绿：11/11 通过
+
+**关键决策**
+- **stub 优先**：没有 key 也能全流程跑通，只是情绪维度不参与打分；等用户填 key 后自动切换真实 LLM
+- **LLM provider 优先级**：Claude > DeepSeek > OpenAI，可通过 `LLM_PROVIDER` 环境变量覆盖
+- **DeepSeek 推荐给个人用户**：价格是 OpenAI/Claude 的 1/10，性能够用
+- **Prompt 强制 JSON 输出**：所有情绪评分都用 `json_mode=True`，避免文本解析歧义
+
+**待用户处理**
+- 在 `.env` 里填入 `ANTHROPIC_API_KEY` / `DEEPSEEK_API_KEY` / `OPENAI_API_KEY` 之一，即可启用真实 LLM 评分
+- 目前默认模型 `claude-opus-4-8`（Claude 最新款），如果用户走 Claude 通道会用这个
+
 ### M1.5：三维度评分器 + 完整项目手册 ✅
 
 **做了什么**

@@ -8,7 +8,7 @@
 
 ## 一、这个项目能做什么
 
-### 已实现（M0 – M1）
+### 已实现（M0 – M2）
 
 | 能力 | 模块 | 说明 |
 |---|---|---|
@@ -21,7 +21,11 @@
 | **技术面评分** | `analysis/technical.py` | 均线多头 / 动量 / RSI / 量能 / 波动率 五子项，0-100 |
 | **基本面评分** | `analysis/fundamental_score.py` | 估值分位 / ROE / 增长三子项，0-100 |
 | **资金面评分** | `analysis/moneyflow_score.py` | 北向变化 / 主力净流入天数 / 换手率三子项，0-100 |
+| **情绪面 LLM 评分** | `ai_analysis/stock_scorer.py` | 用 Claude/DeepSeek/OpenAI 分析公告，输出 0-100 分（无 key 自动 stub） |
+| **大盘情绪 LLM 评分** | `ai_analysis/news_scorer.py` | 分析财联社电报，输出大盘情绪 + 热点板块 |
+| **每日报告生成** | `ai_analysis/daily_report.py` | 组合大盘情绪 + Top N 个股，输出 Markdown |
 | **综合打分选股** | `analysis/scorer.py` | 按权重合并四维度，输出排名 DataFrame |
+| **LLM 抽象层** | `ai_analysis/llm_client.py` | 统一接口封装 Claude/OpenAI/DeepSeek，无 key 自动降级到 stub |
 | **回测引擎** | `vendor/Qbot/` | 基于 backtrader，20+ 现成策略（均线/MACD/KDJ/LightGBM/LSTM 等） |
 | **模拟盘通道** | `vendor/Qbot/qbot/engine/trade/` | Qbot 提供的模拟撮合与掘金/vnpy 通道（M3/M4 阶段接入） |
 
@@ -29,7 +33,6 @@
 
 | 阶段 | 能力 | 依赖 |
 |---|---|---|
-| **M2** | 情绪面 LLM 评分（用 Claude / DeepSeek 分析新闻公告） | 用户提供 API key |
 | **M3** | 本地模拟撮合（每日盘前跑策略、假想账户跟踪 PnL） | 现有代码基础上加 |
 | **M4** | 接入 Qbot 模拟盘（真实模拟环境跑 3 个月） | Qbot GUI 或掘金模拟账号 |
 | **M5** | 每日选股推送（邮件/微信/飞书） | Qbot 已提供通知模块 |
@@ -60,9 +63,13 @@ tonghuashunAI/
 ├── my_strategies/            # 【自研】策略层（M2/M3 填充）
 │   └── (待写)                #   短线波段策略 / 四维评分策略
 │
-├── ai_analysis/              # 【自研】LLM 层（M2 填充）
-│   ├── prompts/              #   Prompt 模板
-│   └── (待写)                #   LLM 情绪分析、每日报告生成
+├── ai_analysis/              # 【自研】LLM 层
+│   ├── llm_client.py         #   统一 LLM 接口（Claude/OpenAI/DeepSeek，无 key 自动 stub）
+│   ├── stock_scorer.py       #   个股 LLM 情绪评分
+│   ├── news_scorer.py        #   大盘 LLM 情绪评分
+│   ├── daily_report.py       #   每日选股 Markdown 报告
+│   ├── prompts/              #   Prompt 模板（stock_sentiment.md, market_sentiment.md）
+│   └── tests/                #   单元测试
 │
 ├── configs/                  # 【自研】配置
 │   ├── stock_pool.yaml       #   股票池：指数或自定义
@@ -70,7 +77,8 @@ tonghuashunAI/
 │
 ├── examples/                 # 【自研】示例脚本
 │   ├── hello_qbot.py         #   最小示例：拉数据 + 跑 Qbot 均线策略回测
-│   └── rank_hs300.py         #   综合评分选股：从沪深300 选 Top N
+│   ├── rank_hs300.py         #   综合评分选股：从沪深300 选 Top N
+│   └── daily_report_demo.py  #   生成每日选股 Markdown 报告
 │
 ├── scripts/                  # 【自研】一键脚本（M3 填充）
 │   └── (待写)                #   run_daily.sh / run_backtest.sh
@@ -170,26 +178,42 @@ python examples/rank_hs300.py --as-of 2024-06-30
 
 首次运行会下 300 只股票的行情+估值+资金流数据，比较慢（约 10–20 分钟，取决于网速）。**所有数据都会缓存到 `./data/` 目录**，之后再跑就是秒级。
 
-### 3.4 跑测试
+### 3.4 生成每日选股分析报告（可选）
+
+```bash
+# 用配置里的股票池，跑前 50 只，输出 Top 10
+python examples/daily_report_demo.py
+
+# 只跑指定的几只股票（跳过股票池）
+python examples/daily_report_demo.py --symbols 600519 000858 300750
+
+# 保存到指定路径
+python examples/daily_report_demo.py --save logs/reports/today.md
+```
+
+**LLM 说明**：
+- 未在 `.env` 里配置任何 `*_API_KEY` → 自动 stub 模式，情绪评分统一 50，其他维度正常
+- 配置了 `ANTHROPIC_API_KEY` → 用 Claude
+- 配置了 `DEEPSEEK_API_KEY` → 用 DeepSeek（**便宜性价比高**，推荐个人使用）
+- 配置了 `OPENAI_API_KEY` → 用 OpenAI
+- 多个都配置时优先级：Claude > DeepSeek > OpenAI，可通过 `LLM_PROVIDER=deepseek` 手动指定
+
+### 3.5 跑测试
 
 ```bash
 # 装 pytest（只测本地逻辑，不需要 akshare）
 pip install pytest
 
-# 运行所有测试
-pytest analysis/tests/ data_layer/tests/ -v
+# 运行所有测试（用 pytest.ini 里的 testpaths 配置，只跑本仓库自研代码）
+pytest
 ```
 
 预期：
 ```
-analysis/tests/test_technical.py::test_sub_scores_shape_and_range PASSED
-analysis/tests/test_technical.py::test_uptrend_scores_higher_than_downtrend PASSED
-analysis/tests/test_technical.py::test_short_data_returns_neutral PASSED
-data_layer/tests/test_cache.py::test_fingerprint_deterministic PASSED
-data_layer/tests/test_cache.py::test_fingerprint_differs_by_param PASSED
-data_layer/tests/test_cache.py::test_cache_roundtrip PASSED
-data_layer/tests/test_cache.py::test_clear_cache PASSED
-7 passed
+data_layer/tests/test_cache.py .... (4)
+analysis/tests/test_technical.py ... (3)
+ai_analysis/tests/test_llm_client.py .... (4)
+11 passed
 ```
 
 ---
@@ -258,7 +282,7 @@ DATA_DIR=./data          # 缓存路径
 - [x] **M0**：初始化仓库、目录骨架、Qbot 源码副本
 - [x] **M1**：数据层封装（行情/基本面/资金/情绪 + 缓存）
 - [x] **M1.5**：三维度评分器（技术/基本/资金）+ 综合打分
-- [ ] **M2**：LLM 情绪分析层（需用户提供 LLM API key）
+- [x] **M2**：LLM 情绪分析层（个股/大盘情绪评分 + 每日报告，无 key 自动 stub）
 - [ ] **M3**：本地模拟撮合（每日盘前跑、假想账户跟踪 PnL）
 - [ ] **M4**：接入 Qbot 模拟盘
 - [ ] **M5**：每日选股推送（邮件/微信/飞书）
