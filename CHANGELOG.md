@@ -2,6 +2,24 @@
 
 ## 2026-07-30
 
+### M1：数据层封装 ✅
+
+**做了什么**
+- 新增 `data_layer/` Python 包，对 AkShare 做统一封装
+- `cache.py`：带 md5 参数指纹的 parquet 本地缓存装饰器 `@cached(namespace, max_age_hours)`
+- `market.py`：日线 / 分钟线 / 全市场实时快照
+- `fundamental.py`：估值（PE/PB/PS）、财务摘要、行业归属
+- `moneyflow.py`：北向资金 / 个股主力净流入 / 板块资金流
+- `sentiment.py`：公告 / 财联社电报 / 龙虎榜 / 概念板块
+- `universe.py`：沪深300/中证500/中证1000 成分股 + 从 `configs/stock_pool.yaml` 加载
+- `tests/test_cache.py`：缓存机制的单测（指纹一致性 + 装饰器命中）
+
+**设计要点**
+- 历史数据（日线、财报）→ 永久缓存
+- 近期数据（快照、龙虎榜）→ 短时缓存（0.1–6 小时）
+- 缓存文件放 `${DATA_DIR}/{namespace}/{fn_name}__{md5}.parquet`，`.gitignore` 已排除
+- 所有函数签名统一 (symbol, start, end)，上层策略无需关心底层数据源
+
 ### M0.5：Qbot 从 submodule 转为本地副本（+ 精简）
 
 **触发**：用户担心上游停更风险，要求把 Qbot 内容直接下载纳入。
