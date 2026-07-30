@@ -35,11 +35,24 @@ def test_stub_json_mode(monkeypatch):
 
 
 def test_auto_prefers_claude(monkeypatch):
+    """在 key + SDK 都存在时优先 claude。这里 mock SDK 存在检查。"""
     monkeypatch.delenv("LLM_PROVIDER", raising=False)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-fake")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-fake")
     monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-fake")
-    assert _resolve_provider("auto") == "claude"
+    # 让 _sdk_available 都返回 True
+    import ai_analysis.llm_client as mod
+    monkeypatch.setattr(mod, "_sdk_available", lambda _: True)
+    assert mod._resolve_provider("auto") == "claude"
+
+
+def test_auto_falls_back_to_stub_when_sdk_missing(monkeypatch):
+    """key 存在但 SDK 未装 → 应该走 stub，而不是选中该 provider。"""
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-fake")
+    import ai_analysis.llm_client as mod
+    monkeypatch.setattr(mod, "_sdk_available", lambda _: False)
+    assert mod._resolve_provider("auto") == "stub"
 
 
 def test_explicit_provider_overrides_env(monkeypatch):

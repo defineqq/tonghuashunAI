@@ -37,13 +37,23 @@ def score_one(symbol: str, as_of: str | None = None, weights: dict | None = None
     weights = weights or _load_weights()
     as_of = as_of or datetime.now().strftime("%Y-%m-%d")
 
-    tech = technical.score(symbol, as_of=as_of, with_detail=True)
-    fund = fundamental_score.score(symbol, as_of=as_of, with_detail=True)
-    money = moneyflow_score.score(symbol, as_of=as_of, with_detail=True)
+    # 每一层都独立 try：任何单点失败降级为中性 50，不影响其他维度
+    try:
+        tech = technical.score(symbol, as_of=as_of, with_detail=True)
+    except Exception as e:
+        tech = {"total": 50.0, "sub": {}, "error": str(e)}
+    try:
+        fund = fundamental_score.score(symbol, as_of=as_of, with_detail=True)
+    except Exception as e:
+        fund = {"total": 50.0, "sub": {}, "error": str(e)}
+    try:
+        money = moneyflow_score.score(symbol, as_of=as_of, with_detail=True)
+    except Exception as e:
+        money = {"total": 50.0, "sub": {}, "error": str(e)}
 
     if use_llm:
         try:
-            from ai_analysis import stock_scorer  # 惰性 import，测试不依赖
+            from ai_analysis import stock_scorer
             sent = stock_scorer.score(symbol, as_of=as_of, with_detail=True)
             sent_total = sent["total"]
             sent_sub = sent
@@ -70,9 +80,9 @@ def score_one(symbol: str, as_of: str | None = None, weights: dict | None = None
         "sentiment": sent_total,
         "moneyflow": money["total"],
         "detail": {
-            "technical": tech["sub"],
-            "fundamental": fund["sub"],
-            "moneyflow": money["sub"],
+            "technical": tech.get("sub", {}),
+            "fundamental": fund.get("sub", {}),
+            "moneyflow": money.get("sub", {}),
             "sentiment": sent_sub,
         },
     }

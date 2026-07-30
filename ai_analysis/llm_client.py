@@ -32,14 +32,20 @@ def _resolve_provider(explicit: Provider = "auto") -> Provider:
     env = os.environ.get("LLM_PROVIDER")
     if env:
         return env  # type: ignore[return-value]
-    # 按存在的 key 自动选
-    if os.environ.get("ANTHROPIC_API_KEY"):
+    # 按存在的 key 自动选，且要求对应 SDK 已安装
+    if os.environ.get("ANTHROPIC_API_KEY") and _sdk_available("anthropic"):
         return "claude"
-    if os.environ.get("DEEPSEEK_API_KEY"):
+    if os.environ.get("DEEPSEEK_API_KEY") and _sdk_available("openai"):
         return "deepseek"
-    if os.environ.get("OPENAI_API_KEY"):
+    if os.environ.get("OPENAI_API_KEY") and _sdk_available("openai"):
         return "openai"
     return "stub"
+
+
+def _sdk_available(mod: str) -> bool:
+    """检查一个模块能否 import（不真的加载）。"""
+    import importlib.util
+    return importlib.util.find_spec(mod) is not None
 
 
 _DEFAULT_MODELS = {

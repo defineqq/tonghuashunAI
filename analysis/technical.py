@@ -109,9 +109,12 @@ def score(
     """
     as_of = as_of or datetime.now().strftime("%Y-%m-%d")
     start = (datetime.strptime(as_of, "%Y-%m-%d") - pd.Timedelta(days=lookback_days * 2)).strftime("%Y-%m-%d")
-    df = market.daily(symbol, start=start, end=as_of)
+    try:
+        df = market.daily(symbol, start=start, end=as_of)
+    except Exception:
+        return {"total": 50.0, "sub": {}, "error": "数据源不可用"} if with_detail else 50.0
     if df.empty:
-        return {"total": 0.0, "sub": {}} if with_detail else 0.0
+        return {"total": 50.0, "sub": {}} if with_detail else 50.0
 
     subs = _sub_scores(df)
     # 等权平均

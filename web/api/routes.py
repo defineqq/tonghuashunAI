@@ -7,6 +7,7 @@ FastAPI 路由
 
 from __future__ import annotations
 
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -32,6 +33,36 @@ class RankRequest(BaseModel):
     as_of: Optional[str] = None
     top_n: Optional[int] = 10
     use_llm: bool = False
+
+
+class ScreenRequest(BaseModel):
+    """一站式股票筛选器：选池 → 筛选 → 打分 → 返回结果。"""
+    pool: str = Field("000300", description="000300=沪深300, 000905=中证500, 000852=中证1000")
+    pool_limit: int = Field(30, description="从池子取前 N 只（数量越大越慢）")
+    preset: str = Field("balanced", description="策略预设：balanced/momentum/value/growth/dividend")
+    min_score: float = Field(0, description="综合分下限（0-100）")
+    top_n: int = Field(10, description="最终返回前 N 只")
+    use_llm: bool = Field(False, description="是否用 LLM 分析情绪面（慢）")
+    as_of: Optional[str] = None
+
+
+# 策略预设 = 权重方案
+PRESET_WEIGHTS = {
+    "balanced":  {"technical": 0.35, "fundamental": 0.20, "sentiment": 0.20, "moneyflow": 0.25},
+    "momentum":  {"technical": 0.55, "fundamental": 0.05, "sentiment": 0.15, "moneyflow": 0.25},
+    "value":     {"technical": 0.15, "fundamental": 0.55, "sentiment": 0.10, "moneyflow": 0.20},
+    "growth":    {"technical": 0.25, "fundamental": 0.40, "sentiment": 0.20, "moneyflow": 0.15},
+    "dividend":  {"technical": 0.10, "fundamental": 0.60, "sentiment": 0.10, "moneyflow": 0.20},
+}
+
+
+PRESET_LABELS = {
+    "balanced":  {"name": "均衡型", "desc": "四维等权，适合不了解自己偏好的用户"},
+    "momentum":  {"name": "动量型", "desc": "重技术面，追涨强势股，短线波段"},
+    "value":     {"name": "价值型", "desc": "重基本面，找低估、财务健康的股票"},
+    "growth":    {"name": "成长型", "desc": "看重基本面 + 情绪，找业绩增长股"},
+    "dividend":  {"name": "红利型", "desc": "重基本面 + 稳定资金流，适合长线持有"},
+}
 
 
 class DailyReportRequest(BaseModel):
@@ -141,8 +172,11 @@ def get_universe(index: str, limit: Optional[int] = None):
     if index not in fn_map:
         raise HTTPException(400, f"不支持的指数: {index}")
     df = fn_map[index]()
-    code_col = next((c for c in df.columns if "代码" in c and "指数" not in c), None)
-    name_col = next((c for c in df.columns if "名称" in c or "简称" in c), None)
+    # 优先匹配"成分券"相关列，避免拿到"指数代码/名称"
+    code_col = next((c for c in df.columns if "成分券代码" in c), None) \
+        or next((c for c in df.columns if "代码" in c and "指数" not in c), None)
+    name_col = next((c for c in df.columns if "成分券名称" in c), None) \
+        or next((c for c in df.columns if ("名称" in c or "简称" in c) and "指数" not in c and "英文" not in c and "交易所" not in c), None)
     items = []
     for _, row in df.iterrows():
         item = {"code": str(row[code_col]).zfill(6)}
@@ -167,6 +201,40 @@ def get_daily(symbol: str, start: str = "2024-01-01", end: Optional[str] = None)
     return {"symbol": symbol, "count": len(df), "data": df.to_dict(orient="records")}
 
 
+@router.get("/market/search", summary="搜股票（按代码或名称）")
+def market_search(q: str, limit: int = 10):
+    """
+    从沪深300+中证500 里搜索。q 支持代码前缀或名称片段。
+    """
+    from data_layer import universe as uni
+    q = q.strip()
+    if not q:
+        return {"items": []}
+
+    matches = []
+    seen = set()
+    for fn in (uni.hs300_constituents, uni.csi500_constituents):
+        try:
+            df = fn()
+        except Exception:
+            continue
+        code_col = next((c for c in df.columns if "成分券代码" in c), None)
+        name_col = next((c for c in df.columns if "成分券名称" in c), None)
+        if not (code_col and name_col):
+            continue
+        for _, row in df.iterrows():
+            code = str(row[code_col]).zfill(6)
+            name = str(row[name_col])
+            if code in seen:
+                continue
+            if q in code or q in name:
+                matches.append({"code": code, "name": name})
+                seen.add(code)
+                if len(matches) >= limit:
+                    return {"items": matches}
+    return {"items": matches}
+
+
 # ================ 评分 =================
 
 
@@ -184,6 +252,82 @@ def rank(req: RankRequest):
     from analysis.scorer import rank_universe
     df = rank_universe(req.symbols, as_of=req.as_of, top_n=req.top_n, use_llm=req.use_llm, verbose=False)
     return {"count": len(df), "data": df.to_dict(orient="records")}
+
+
+@router.get("/screen/presets", summary="策略预设列表（首页用）")
+def screen_presets():
+    return {
+        "presets": [
+            {"key": k, "weights": PRESET_WEIGHTS[k], **PRESET_LABELS[k]}
+            for k in ("balanced", "momentum", "value", "growth", "dividend")
+        ]
+    }
+
+
+@router.post("/screen", summary="股票筛选器（首页核心 API）")
+def screen(req: ScreenRequest):
+    """
+    一站式：
+    1) 拉指定指数成分股，取前 pool_limit 只
+    2) 按 preset 权重打四维分
+    3) 过滤 total >= min_score
+    4) 返回 top_n 只
+    """
+    from data_layer import universe as uni
+    from analysis import scorer as _scorer
+    from analysis import technical, fundamental_score, moneyflow_score
+    import pandas as pd
+
+    fn_map = {
+        "000300": uni.hs300_constituents,
+        "000905": uni.csi500_constituents,
+        "000852": uni.csi1000_constituents,
+    }
+    if req.pool not in fn_map:
+        raise HTTPException(400, f"不支持的指数: {req.pool}")
+
+    df_idx = fn_map[req.pool]()
+    code_col = next((c for c in df_idx.columns if "成分券代码" in c), None) \
+        or next((c for c in df_idx.columns if "代码" in c and "指数" not in c), None)
+    name_col = next((c for c in df_idx.columns if "成分券名称" in c), None) \
+        or next((c for c in df_idx.columns if "名称" in c and "指数" not in c and "英文" not in c and "交易所" not in c), None)
+
+    subset = df_idx.head(req.pool_limit)
+    weights = PRESET_WEIGHTS.get(req.preset, PRESET_WEIGHTS["balanced"])
+
+    rows = []
+    for _, row in subset.iterrows():
+        sym = str(row[code_col]).zfill(6)
+        name = str(row[name_col]) if name_col else sym
+        r = _scorer.score_one(sym, as_of=req.as_of, weights=weights, use_llm=req.use_llm)
+        r["name"] = name
+        rows.append(r)
+
+    # 过滤 + 排序
+    filtered = [r for r in rows if r["total"] >= req.min_score]
+    filtered.sort(key=lambda x: x["total"], reverse=True)
+    top = filtered[: req.top_n]
+
+    return {
+        "preset": req.preset,
+        "preset_name": PRESET_LABELS.get(req.preset, {}).get("name", req.preset),
+        "weights": weights,
+        "pool_size": len(subset),
+        "matched": len(filtered),
+        "results": [
+            {
+                "symbol": r["symbol"],
+                "name": r["name"],
+                "total": r["total"],
+                "technical": r["technical"],
+                "fundamental": r["fundamental"],
+                "sentiment": r["sentiment"],
+                "moneyflow": r["moneyflow"],
+                "detail": r["detail"],
+            }
+            for r in top
+        ],
+    }
 
 
 # ================ 每日报告 =================
@@ -382,3 +526,117 @@ def notify_test(req: NotifyTestRequest):
     from notify.dispatch import notify, summary_line
     result = notify(req.title, req.text)
     return {"result": result, "summary": summary_line(result)}
+
+
+# ================ 设置 =================
+
+
+ENV_FILE = Path(".env")
+STRATEGY_FILE = Path("configs/strategy.yaml")
+
+# 允许通过设置页读写的环境变量白名单（避免用户误改敏感/系统变量）
+ENV_KEYS = [
+    "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "DEEPSEEK_API_KEY", "LLM_PROVIDER",
+    "TUSHARE_TOKEN", "DATA_DIR",
+    "FEISHU_WEBHOOK", "DINGTALK_WEBHOOK", "DINGTALK_SECRET", "WECHAT_WEBHOOK",
+    "SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "SMTP_TO",
+]
+
+SENSITIVE_KEYS = {
+    "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "DEEPSEEK_API_KEY",
+    "TUSHARE_TOKEN", "SMTP_PASS", "DINGTALK_SECRET",
+}
+
+
+def _mask(val: str) -> str:
+    if not val:
+        return ""
+    if len(val) <= 8:
+        return "***"
+    return val[:4] + "***" + val[-4:]
+
+
+def _read_env_file() -> dict[str, str]:
+    if not ENV_FILE.exists():
+        return {}
+    result = {}
+    for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        result[k.strip()] = v.strip().strip('"').strip("'")
+    return result
+
+
+@router.get("/settings", summary="读所有设置")
+def get_settings():
+    """敏感值（API key 等）会脱敏，只显示头尾 4 位。"""
+    env_file = _read_env_file()
+    env_data = {}
+    for k in ENV_KEYS:
+        val = env_file.get(k) or os.environ.get(k, "")
+        if k in SENSITIVE_KEYS and val:
+            env_data[k] = {"value": _mask(val), "set": True, "masked": True}
+        else:
+            env_data[k] = {"value": val, "set": bool(val), "masked": False}
+
+    # 策略配置
+    strategy = {}
+    if STRATEGY_FILE.exists():
+        import yaml
+        strategy = yaml.safe_load(STRATEGY_FILE.read_text(encoding="utf-8")) or {}
+
+    return {"env": env_data, "strategy": strategy}
+
+
+class SaveSettingsRequest(BaseModel):
+    env: dict[str, str] = Field(default_factory=dict)
+    strategy: Optional[dict] = None
+
+
+@router.post("/settings", summary="保存设置")
+def save_settings(req: SaveSettingsRequest):
+    """
+    - env：只更新白名单里的 key；空字符串表示不修改（避免误覆盖已存在的敏感值）
+    - strategy：整体覆写 configs/strategy.yaml
+    """
+    env_file = _read_env_file()
+    for k, v in req.env.items():
+        if k not in ENV_KEYS:
+            continue
+        # 空字符串 = 不修改（如果用户想清空，前端传 "__CLEAR__"）
+        if v == "__CLEAR__":
+            env_file.pop(k, None)
+        elif v == "" or v.startswith("***"):
+            # 空 或 仍是脱敏后的显示值 → 视为未修改
+            continue
+        else:
+            env_file[k] = v
+            os.environ[k] = v  # 立即生效
+
+    # 重写 .env 文件
+    lines = ["# tonghuashunAI 配置文件（Web 设置页自动生成/维护）", ""]
+    lines.append("# ============ LLM API ============")
+    for k in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "DEEPSEEK_API_KEY", "LLM_PROVIDER"):
+        lines.append(f'{k}={env_file.get(k, "")}')
+    lines += ["", "# ============ 数据源 ============"]
+    for k in ("TUSHARE_TOKEN", "DATA_DIR"):
+        lines.append(f'{k}={env_file.get(k, "")}')
+    lines += ["", "# ============ 通知 ============"]
+    for k in ("FEISHU_WEBHOOK", "DINGTALK_WEBHOOK", "DINGTALK_SECRET", "WECHAT_WEBHOOK",
+              "SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "SMTP_TO"):
+        lines.append(f'{k}={env_file.get(k, "")}')
+    ENV_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    if req.strategy is not None:
+        import yaml
+        STRATEGY_FILE.parent.mkdir(parents=True, exist_ok=True)
+        STRATEGY_FILE.write_text(
+            yaml.safe_dump(req.strategy, allow_unicode=True, sort_keys=False),
+            encoding="utf-8"
+        )
+
+    return {"ok": True}
