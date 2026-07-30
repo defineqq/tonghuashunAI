@@ -1,5 +1,37 @@
 # CHANGELOG
 
+## 快速总览（2026-07-30 一夜进度）
+
+用户睡前授权按推荐方案自主推进。一晚完成 **M0 → M2** 五个里程碑：
+
+| # | 里程碑 | 状态 | 关键产出 |
+|---|--------|:----:|---------|
+| M0 | 初始化仓库 + Qbot 底座（submodule） | ✅ | 目录骨架、`.gitignore`、`README`、`hello_qbot.py` |
+| M0.5 | Qbot 从 submodule 转为本地副本（防上游停更） | ✅ | `vendor/Qbot/` 精简到 77MB、`NOTICE.md` |
+| M1 | 数据层（AkShare 封装 + parquet 缓存） | ✅ | `data_layer/` 5 模块 + 缓存装饰器 |
+| M1.5 | 三维度评分器（技术/基本/资金） | ✅ | `analysis/` 4 模块 + `rank_hs300.py` |
+| M2 | LLM 情绪分析层（Claude/DeepSeek/OpenAI + stub 兜底） | ✅ | `ai_analysis/` 4 模块 + `daily_report.py` |
+
+**验证**：pytest 11/11 全绿（不需要外部 API 就能跑）。
+**Commits**：6 次 commit，全部已 push 到 `defineqq/tonghuashunAI`。
+
+### 早上起床看这里 👇
+
+1. **看整体**：直接读 [README.md](./README.md)，是完整的项目手册
+2. **看进度**：读下面 M0/M0.5/M1/M1.5/M2 的详细决策记录
+3. **想立刻跑**：
+   ```bash
+   cd /home/gem/tonghuashunAI
+   python3.9 -m venv .venv && source .venv/bin/activate
+   pip install -r vendor/Qbot/requirements.txt -r requirements.txt
+   python examples/hello_qbot.py             # 拉贵州茅台数据+回测
+   python examples/daily_report_demo.py --symbols 600519 000858 300750
+   ```
+4. **要接真实 LLM**：把 `.env.example` 拷成 `.env`，填一个 API key（推荐 DeepSeek，便宜）
+5. **想继续做**：下一站是 **M3 本地模拟撮合**（每日盘前跑、假想账户跟 PnL），预计半天左右
+
+---
+
 ## 2026-07-30
 
 ### M2：LLM 情绪分析层 ✅

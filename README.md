@@ -4,7 +4,17 @@
 > **当前阶段：模拟盘 / 尚未接实盘。**
 > 底座：开源项目 [Qbot](https://github.com/UFund-Me/Qbot)（1.8w⭐, MIT）源码副本 + 自研数据/分析/策略层。
 
+## 💤 起床看这里（2026-07-30 夜里的进展）
+
+- ✅ **M0 → M2 全部完成**：数据层、评分层、LLM 情绪分析层、每日报告生成器都能用
+- ✅ **pytest 11/11 全绿**
+- ✅ **6 次 commit 已 push** 到你的私有仓库 `defineqq/tonghuashunAI`
+- ⏭️ **下一步**：M3 本地模拟撮合（每日跑策略 + 假想账户跟 PnL）
+- 📖 **详细决策**：见 [CHANGELOG.md](./CHANGELOG.md)
+- 🔑 **想启用 LLM 情绪评分**：把 `.env.example` 拷成 `.env`，填一个 API key（推荐 DeepSeek）
+
 ---
+
 
 ## 一、这个项目能做什么
 
