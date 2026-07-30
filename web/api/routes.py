@@ -88,6 +88,7 @@ class BacktestRequest(BaseModel):
     limit: Optional[int] = 50
     initial_cash: float = 100_000
     min_score: float = 65.0
+    preset: str = Field("balanced", description="选股风格：balanced/momentum/value/growth/dividend")
 
 
 class NewPortfolioRequest(BaseModel):
@@ -124,6 +125,109 @@ def get_status():
             "version": f"{__import__('sys').version_info[:3]}",
         },
     }
+
+
+@router.get("/status/datasources", summary="数据源健康检查")
+def check_datasources():
+    """
+    实时探测各数据源是否可用。用一只测试股（贵州茅台）跑一遍关键接口。
+    结果被短时缓存（1 分钟）。
+    """
+    import time
+    from data_layer.cache import _data_dir
+    from pathlib import Path
+    import json as _json
+
+    # 简单文件缓存 1 分钟
+    cache_file = _data_dir() / "_health.json"
+    if cache_file.exists() and (time.time() - cache_file.stat().st_mtime) < 60:
+        try:
+            return _json.loads(cache_file.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
+    checks = []
+    test_symbol = "600519"
+
+    # 1) 日线（多源回退）
+    t0 = time.time()
+    try:
+        from data_layer import market
+        df = market.daily(test_symbol, start="2024-11-01", end="2024-12-31")
+        checks.append({
+            "name": "日线行情", "key": "daily",
+            "ok": not df.empty,
+            "latency_ms": int((time.time() - t0) * 1000),
+            "detail": f"{len(df)} 行" if not df.empty else "空",
+        })
+    except Exception as e:
+        checks.append({"name": "日线行情", "key": "daily", "ok": False,
+                       "latency_ms": int((time.time() - t0) * 1000), "detail": str(e)[:80]})
+
+    # 2) 成分股
+    t0 = time.time()
+    try:
+        from data_layer import universe
+        df = universe.hs300_constituents()
+        checks.append({"name": "沪深300 成分股", "key": "universe",
+                       "ok": len(df) > 200, "latency_ms": int((time.time() - t0) * 1000),
+                       "detail": f"{len(df)} 只"})
+    except Exception as e:
+        checks.append({"name": "沪深300 成分股", "key": "universe", "ok": False,
+                       "latency_ms": int((time.time() - t0) * 1000), "detail": str(e)[:80]})
+
+    # 3) 主力资金流（含回退）
+    t0 = time.time()
+    try:
+        from data_layer import moneyflow
+        df = moneyflow.stock_moneyflow(test_symbol)
+        checks.append({"name": "主力资金流", "key": "moneyflow", "ok": not df.empty,
+                       "latency_ms": int((time.time() - t0) * 1000),
+                       "detail": f"{len(df)} 行" if not df.empty else "空"})
+    except Exception as e:
+        checks.append({"name": "主力资金流", "key": "moneyflow", "ok": False,
+                       "latency_ms": int((time.time() - t0) * 1000), "detail": str(e)[:80]})
+
+    # 4) 财报
+    t0 = time.time()
+    try:
+        from data_layer import fundamental
+        df = fundamental.financial_abstract(test_symbol)
+        checks.append({"name": "财务摘要", "key": "fundamental", "ok": not df.empty,
+                       "latency_ms": int((time.time() - t0) * 1000),
+                       "detail": f"{len(df)} 行" if not df.empty else "空"})
+    except Exception as e:
+        checks.append({"name": "财务摘要", "key": "fundamental", "ok": False,
+                       "latency_ms": int((time.time() - t0) * 1000), "detail": str(e)[:80]})
+
+    # 5) 财联社新闻（大盘情绪源）
+    t0 = time.time()
+    try:
+        from data_layer import sentiment
+        df = sentiment.cls_news(limit=5)
+        checks.append({"name": "财联社电报", "key": "cls_news", "ok": not df.empty,
+                       "latency_ms": int((time.time() - t0) * 1000),
+                       "detail": f"{len(df)} 条"})
+    except Exception as e:
+        checks.append({"name": "财联社电报", "key": "cls_news", "ok": False,
+                       "latency_ms": int((time.time() - t0) * 1000), "detail": str(e)[:80]})
+
+    ok_count = sum(1 for c in checks if c["ok"])
+    result = {
+        "checked_at": datetime.now().isoformat(),
+        "healthy": ok_count == len(checks),
+        "ok_count": ok_count,
+        "total": len(checks),
+        "checks": checks,
+    }
+
+    try:
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        cache_file.write_text(_json.dumps(result, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
+
+    return result
 
 
 # ================ 账户 =================
@@ -436,27 +540,51 @@ def backtest_run(req: BacktestRequest):
     if req.pool not in fn_map:
         raise HTTPException(400, f"不支持的指数: {req.pool}")
 
-    df_idx = fn_map[req.pool]()
-    code_col = next((c for c in df_idx.columns if "代码" in c and "指数" not in c), None)
+    try:
+        df_idx = fn_map[req.pool]()
+    except Exception as e:
+        raise HTTPException(503, f"股票池数据源暂时不可用（AkShare 接口失败）：{e}。请稍后重试。")
+
+    code_col = next((c for c in df_idx.columns if "成分券代码" in c), None) \
+        or next((c for c in df_idx.columns if "代码" in c and "指数" not in c), None)
     symbols = [str(x).zfill(6) for x in df_idx[code_col].tolist()]
     if req.limit:
         symbols = symbols[: req.limit]
 
-    result = engine.run(
-        strategy_fn=swing_v1.generate_signals,
-        universe=symbols,
-        start=req.start,
-        end=req.end,
-        initial_cash=req.initial_cash,
-        strategy_kwargs={"min_score": req.min_score, "use_llm": False},
-    )
-    md_path = report.render(result, strategy_name="swing_v1")
+    weights = PRESET_WEIGHTS.get(req.preset, PRESET_WEIGHTS["balanced"])
+
+    try:
+        result = engine.run(
+            strategy_fn=swing_v1.generate_signals,
+            universe=symbols,
+            start=req.start,
+            end=req.end,
+            initial_cash=req.initial_cash,
+            strategy_kwargs={
+                "min_score": req.min_score,
+                "use_llm": False,           # 回测强制关 LLM 避免天量调用
+                "weights": weights,
+            },
+        )
+    except Exception as e:
+        raise HTTPException(503, f"回测执行失败：{e}。可能是数据源问题，请稍后重试或缩短回测时间。")
+
+    md_path = report.render(result, strategy_name=f"swing_v1_{req.preset}")
     snapshots = result["snapshots"].copy()
     snapshots["date"] = snapshots["date"].astype(str)
     return {
+        "strategy": "swing_v1",
+        "preset": req.preset,
+        "preset_name": PRESET_LABELS.get(req.preset, {}).get("name", req.preset),
+        "weights": weights,
         "metrics": result["metrics"],
         "snapshots": snapshots.to_dict(orient="records"),
         "trades_count": len(result["portfolio"].trades),
+        "trades_sample": [
+            {"date": t.date, "symbol": t.symbol, "side": t.side,
+             "shares": t.shares, "price": t.price, "reason": t.reason}
+            for t in result["portfolio"].trades[-10:]
+        ],
         "report_path": str(md_path),
     }
 

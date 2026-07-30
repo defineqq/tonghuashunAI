@@ -94,17 +94,19 @@ def rank_universe(
     top_n: int | None = None,
     use_llm: bool = True,
     verbose: bool = False,
+    weights: dict | None = None,
 ) -> pd.DataFrame:
     """
     对一组股票打分并排序。
 
     Args:
         use_llm: 是否用 LLM 打情绪分。False 时跳过（跑几百只时更快）。
+        weights: 四维权重字典。不填时读 configs/strategy.yaml。
 
     Returns:
         DataFrame，按 total 降序，包含 symbol, total, technical, fundamental, sentiment, moneyflow 列。
     """
-    weights = _load_weights()
+    weights = weights or _load_weights()
     rows = []
     for i, sym in enumerate(symbols, 1):
         if verbose:

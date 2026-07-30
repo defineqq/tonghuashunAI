@@ -94,6 +94,21 @@
 
   <!-- ============ 首页：智能选股 ============ -->
   <section id="tab-home" class="tab-panel space-y-6">
+    <!-- 数据源健康提示（折叠） -->
+    <div id="health-banner" class="hidden card p-4">
+      <div class="flex items-center justify-between cursor-pointer" onclick="toggleHealthPanel()">
+        <div class="flex items-center gap-3">
+          <span id="health-icon" class="text-lg">⚙️</span>
+          <div>
+            <div class="font-medium text-sm" id="health-title">数据源状态</div>
+            <div class="text-xs text-slate-500" id="health-subtitle">点击查看详情</div>
+          </div>
+        </div>
+        <span class="text-slate-400 text-xs" id="health-toggle">▼</span>
+      </div>
+      <div id="health-detail" class="hidden mt-3 pt-3 border-t border-slate-100 text-xs space-y-1"></div>
+    </div>
+
     <div class="card p-6">
       <div class="flex items-start justify-between mb-1">
         <h2 class="text-xl font-semibold">🔍 智能选股</h2>
@@ -178,8 +193,8 @@
       </div>
       <div class="card p-5">
         <div class="text-2xl mb-2">🧠</div>
-        <div class="font-semibold mb-1">选股风格</div>
-        <div class="text-sm text-slate-500">均衡 / 动量 / 价值 / 成长 / 红利，5 种预设权重，无需理解量化术语。</div>
+        <div class="font-semibold mb-1">选股风格 = 策略</div>
+        <div class="text-sm text-slate-500">这 5 种风格就是"策略"本身：不同的四维权重方案。回测和账户都用这些风格。</div>
       </div>
       <div class="card p-5">
         <div class="text-2xl mb-2">📊</div>
@@ -237,23 +252,77 @@
   <section id="tab-backtest" class="tab-panel hidden space-y-6">
     <div class="card p-6">
       <h2 class="text-xl font-semibold mb-1">📊 策略回测</h2>
-      <p class="text-sm text-slate-500 mb-4">用历史数据验证策略。看看如果你从某天开始跑这个策略，收益会是多少。</p>
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <p class="text-sm text-slate-500 mb-4">用历史数据验证策略：假设从"开始日期"起，按选定风格持续跑，最终收益会是多少。</p>
+
+      <!-- 策略说明 -->
+      <div class="p-4 bg-blue-50 border border-blue-100 rounded-lg mb-6">
+        <div class="font-semibold text-sm text-blue-900 mb-1">📋 当前回测策略：<span class="font-mono">swing_v1</span>（日级波段）</div>
+        <div class="text-xs text-blue-800 leading-relaxed">
+          <b>选股</b>：每天从股票池里按下面选的"风格"打四维分，综合分 ≥ 分数下限的进入候选，取前 5 只买入 <br>
+          <b>持仓</b>：单只 18% 仓位，最多同时持 5 只（可在 ⚙️ 设置里调） <br>
+          <b>卖出</b>：亏 5% 止损 / 赚 15% 止盈减半 / 持有满 10 天到期强平（可在 ⚙️ 设置里调） <br>
+          <b>成本</b>：万分之三佣金 + 千分之一印花税 + 千分之一滑点（真实 A 股水平）
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 md:grid-cols-3 gap-3 mb-3">
+        <div class="md:col-span-3">
+          <div class="label flex items-center gap-1">
+            选股风格
+            <span class="info relative">
+              <span class="text-slate-400">ⓘ</span>
+              <span class="tip">跟首页的"选股风格"一致。选不同风格 = 跑不同的策略。</span>
+            </span>
+          </div>
+          <select id="bt-preset" class="field">
+            <option value="balanced">⚖️ 均衡 · 四维等权</option>
+            <option value="momentum">🚀 动量 · 追强势股（短线）</option>
+            <option value="value">💎 价值 · 低估值优先</option>
+            <option value="growth">🌱 成长 · 找业绩爆发</option>
+            <option value="dividend">💰 红利 · 稳定分红（长线）</option>
+          </select>
+        </div>
         <div><div class="label">开始日期</div><input id="bt-start" type="date" class="field"></div>
         <div><div class="label">结束日期</div><input id="bt-end" type="date" class="field"></div>
-        <div><div class="label">股票池</div>
+        <div>
+          <div class="label flex items-center gap-1">
+            股票池
+          </div>
           <select id="bt-pool" class="field">
             <option value="000300">沪深 300</option>
             <option value="000905">中证 500</option>
           </select>
         </div>
-        <div><div class="label">池大小</div><input id="bt-limit" type="number" value="20" class="field"></div>
+        <div>
+          <div class="label flex items-center gap-1">
+            池大小
+            <span class="info relative">
+              <span class="text-slate-400">ⓘ</span>
+              <span class="tip">从池子取前 N 只。20 只跑半年约 30s，300 只跑一年可能十几分钟。</span>
+            </span>
+          </div>
+          <input id="bt-limit" type="number" value="20" class="field">
+        </div>
+        <div>
+          <div class="label flex items-center gap-1">
+            综合分下限
+            <span class="info relative">
+              <span class="text-slate-400">ⓘ</span>
+              <span class="tip">买入门槛。设 65 表示只买综合分 ≥ 65 的股票。设 0 就是每天都买 Top 5。</span>
+            </span>
+          </div>
+          <input id="bt-min-score" type="number" value="65" min="0" max="100" class="field">
+        </div>
       </div>
-      <button onclick="runBacktest()" id="bt-btn" class="btn btn-primary mt-4">开始回测</button>
+
+      <button onclick="runBacktest()" id="bt-btn" class="btn btn-primary mt-2">开始回测</button>
       <div id="bt-status" class="text-sm text-slate-500 mt-3"></div>
+
       <div id="bt-result" class="hidden mt-6">
+        <div id="bt-meta" class="text-sm text-slate-600 mb-3"></div>
         <div id="bt-metrics" class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4"></div>
         <canvas id="bt-chart" height="120"></canvas>
+        <div id="bt-trades" class="mt-6"></div>
       </div>
     </div>
   </section>

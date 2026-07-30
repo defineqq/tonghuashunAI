@@ -48,6 +48,61 @@ async function refreshStatus() {
 }
 refreshStatus();
 
+// 数据源健康检查
+async function refreshHealth() {
+  const banner = document.getElementById('health-banner');
+  const icon = document.getElementById('health-icon');
+  const title = document.getElementById('health-title');
+  const subtitle = document.getElementById('health-subtitle');
+  const detail = document.getElementById('health-detail');
+  if (!banner) return;
+  banner.classList.remove('hidden');
+  title.textContent = '正在检查数据源...';
+  subtitle.textContent = '首次检查约 5 秒';
+  icon.textContent = '⏳';
+  try {
+    const r = await API('/status/datasources');
+    if (r.healthy) {
+      icon.textContent = '✅';
+      banner.className = 'card p-4 border-l-4 border-emerald-400';
+      title.textContent = `所有数据源正常 (${r.ok_count}/${r.total})`;
+      subtitle.textContent = '打分和回测应能得到真实数据';
+    } else if (r.ok_count > 0) {
+      icon.textContent = '⚠️';
+      banner.className = 'card p-4 border-l-4 border-amber-400';
+      title.textContent = `部分数据源可用 (${r.ok_count}/${r.total})`;
+      subtitle.textContent = '缺失的维度会用中性 50 分兜底，仍可正常筛选';
+    } else {
+      icon.textContent = '❌';
+      banner.className = 'card p-4 border-l-4 border-red-400';
+      title.textContent = '所有数据源不可用';
+      subtitle.textContent = '网络问题？打分会全部返回 50，请稍后重试';
+    }
+    detail.innerHTML = r.checks.map(c => `
+      <div class="flex items-center justify-between py-1">
+        <span class="flex items-center gap-2">
+          <span>${c.ok ? '✅' : '❌'}</span>
+          <span>${c.name}</span>
+        </span>
+        <span class="text-slate-400 text-xs">${c.detail} · ${c.latency_ms}ms</span>
+      </div>
+    `).join('');
+  } catch (e) {
+    icon.textContent = '❌';
+    banner.className = 'card p-4 border-l-4 border-red-400';
+    title.textContent = '健康检查失败';
+    subtitle.textContent = e.message;
+  }
+}
+refreshHealth();
+
+window.toggleHealthPanel = function() {
+  const detail = document.getElementById('health-detail');
+  const toggle = document.getElementById('health-toggle');
+  detail.classList.toggle('hidden');
+  toggle.textContent = detail.classList.contains('hidden') ? '▼' : '▲';
+};
+
 // -------- 预设 --------
 let presets = [];
 let selectedPreset = 'balanced';
@@ -438,19 +493,33 @@ async function runBacktest() {
   const start = document.getElementById('bt-start').value;
   const end = document.getElementById('bt-end').value;
   const pool = document.getElementById('bt-pool').value;
+  const preset = document.getElementById('bt-preset').value;
   const limit = parseInt(document.getElementById('bt-limit').value) || 20;
+  const minScore = parseFloat(document.getElementById('bt-min-score').value) || 0;
   if (!start || !end) return alert('请选择起止日期');
   const btn = document.getElementById('bt-btn');
   const status = document.getElementById('bt-status');
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span> 回测中...';
-  status.innerHTML = '<span class="spinner"></span> 逐日撮合中，几十秒到几分钟...';
+  status.innerHTML = `<span class="spinner"></span> 正在逐日模拟撮合... 池大小 ${limit}，风格 ${preset}，可能需要几十秒到几分钟`;
   try {
     const r = await API('/backtest/run', {
-      method: 'POST', body: JSON.stringify({ start, end, pool, limit, initial_cash: 100000 }),
+      method: 'POST',
+      body: JSON.stringify({ start, end, pool, preset, limit, min_score: minScore, initial_cash: 100000 }),
     });
     status.textContent = `完成 · 成交 ${r.trades_count} 笔`;
     document.getElementById('bt-result').classList.remove('hidden');
+
+    // 元信息
+    const w = r.weights;
+    document.getElementById('bt-meta').innerHTML = `
+      策略：<b>swing_v1</b> · 风格：<b>${r.preset_name}</b>
+      <span class="text-slate-400">
+        (技术 ${(w.technical*100).toFixed(0)}% · 基本 ${(w.fundamental*100).toFixed(0)}%
+        · 情绪 ${(w.sentiment*100).toFixed(0)}% · 资金 ${(w.moneyflow*100).toFixed(0)}%)
+      </span>
+    `;
+
     const m = r.metrics;
     const cards = [
       ['累计收益', (m.cumulative_return * 100).toFixed(2) + '%', m.cumulative_return >= 0],
@@ -463,6 +532,7 @@ async function runBacktest() {
         <div class="text-xs text-slate-500">${k}</div>
         <div class="text-xl font-semibold mt-1 ${good ? 'text-red-600' : 'text-slate-700'}">${v}</div>
       </div>`).join('');
+
     if (btChart) btChart.destroy();
     btChart = new Chart(document.getElementById('bt-chart'), {
       type: 'line',
@@ -479,6 +549,28 @@ async function runBacktest() {
         plugins: { legend: { display: false } },
       },
     });
+
+    // 最近成交
+    const trades = r.trades_sample || [];
+    document.getElementById('bt-trades').innerHTML = trades.length ? `
+      <div class="font-semibold text-sm text-slate-700 mb-2">最后 ${trades.length} 笔成交</div>
+      <div class="overflow-x-auto"><table class="min-w-full text-sm">
+        <thead class="bg-slate-50 text-xs text-slate-500"><tr>
+          <th class="px-3 py-2 text-left">日期</th>
+          <th class="px-3 py-2 text-left">方向</th>
+          <th class="px-3 py-2 text-left">代码</th>
+          <th class="px-3 py-2 text-left">数量/价格</th>
+          <th class="px-3 py-2 text-left">原因</th>
+        </tr></thead><tbody>
+          ${trades.map(t => `<tr class="border-b border-slate-100">
+            <td class="px-3 py-2 text-xs">${t.date}</td>
+            <td class="px-3 py-2 text-xs font-semibold ${t.side === 'buy' ? 'text-red-600' : 'text-emerald-600'}">${t.side === 'buy' ? '买' : '卖'}</td>
+            <td class="px-3 py-2 font-mono text-xs">${t.symbol}</td>
+            <td class="px-3 py-2 text-xs">${t.shares} 股 @ ¥${t.price.toFixed(2)}</td>
+            <td class="px-3 py-2 text-xs text-slate-500">${t.reason}</td>
+          </tr>`).join('')}
+        </tbody></table></div>
+    ` : '';
   } catch (e) {
     status.innerHTML = `<span class="text-red-500">失败: ${e.message}</span>`;
   } finally {
@@ -506,11 +598,15 @@ async function loadSettings() {
     const s = r.strategy?.swing_v1 || {};
     document.querySelectorAll('[data-strategy]').forEach(input => {
       const key = input.dataset.strategy;
-      // position_size_pct = position_size * 100
       if (key === 'position_size_pct') {
-        input.value = ((s.position_size || 0.18) * 100).toFixed(0);
+        // position_size 应该是 0-1 的比例。如果错存成 > 1（曾经的 bug），做个夹持
+        const raw = s.position_size !== undefined ? s.position_size : 0.18;
+        const clamped = raw > 1 ? 0.18 : raw;  // > 1 视为脏数据，恢复默认
+        input.value = (clamped * 100).toFixed(0);
       } else if (key === 'stop_loss_pct' || key === 'take_profit_pct') {
-        input.value = ((s[key] || 0.05) * 100).toFixed(1);
+        const raw = s[key] !== undefined ? s[key] : (key === 'stop_loss_pct' ? 0.05 : 0.15);
+        const clamped = raw > 1 ? raw / 100 : raw;  // 兜底：> 1 说明存的是百分比
+        input.value = (clamped * 100).toFixed(1);
       } else {
         input.value = s[key] !== undefined ? s[key] : '';
       }

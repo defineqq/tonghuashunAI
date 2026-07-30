@@ -36,6 +36,7 @@ def generate_signals(
     min_score: float = 65.0,
     use_llm: bool = True,
     cfg_path: str | Path = "configs/strategy.yaml",
+    weights: dict | None = None,
 ) -> tuple[list[BuySignal], list[SellSignal]]:
     """
     根据当前账户 + 股票池 + 综合评分生成买卖信号。
@@ -47,6 +48,7 @@ def generate_signals(
         min_score: 综合评分下限
         use_llm: 是否用 LLM 打情绪分
         cfg_path: 策略配置
+        weights: 四维权重字典，覆盖 cfg_path 里的默认值（用于回测切换风格）
 
     Returns:
         (buy_signals, sell_signals)
@@ -63,7 +65,7 @@ def generate_signals(
     if not universe:
         return [], []
 
-    ranked = rank_universe(universe, as_of=as_of, use_llm=use_llm, verbose=False)
+    ranked = rank_universe(universe, as_of=as_of, use_llm=use_llm, verbose=False, weights=weights)
     if ranked.empty:
         return [], []
 

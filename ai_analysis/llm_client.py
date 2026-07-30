@@ -49,7 +49,9 @@ def _sdk_available(mod: str) -> bool:
 
 
 _DEFAULT_MODELS = {
-    "claude": "claude-opus-4-8",           # 2026 最新
+    "claude": os.environ.get("ANTHROPIC_MODEL")
+              or os.environ.get("ANTHROPIC_DEFAULT_SONNET_MODEL")
+              or "claude-sonnet-5",  # 环境变量优先，兼容公司代理
     "openai": "gpt-4o-mini",
     "deepseek": "deepseek-chat",
 }
