@@ -4,11 +4,14 @@ A 股 AI 量化分析与自动化交易项目。**当前阶段：模拟盘 / 尚
 
 ## 架构
 
-以开源项目 [Qbot](https://github.com/UFund-Me/Qbot)（1.8w⭐, MIT）为底座，通过 git submodule 引入到 `vendor/Qbot/`。本仓库只维护"增量"：自定义策略、AI 分析层、股票池、配置和运行脚本。
+以开源项目 [Qbot](https://github.com/UFund-Me/Qbot)（1.8w⭐, MIT）为底座，源码已作为**本地副本**纳入 `vendor/Qbot/`（详见 `NOTICE.md`）。本仓库同时维护自定义策略、AI 分析层、股票池、配置和运行脚本。
+
+> **为什么直接纳入而不用 submodule？** 上游可能停更，直接纳入避免风险；同时精简了 600+MB 无关文件（预编译 wheel、教程代码、二进制工具），Qbot 部分只保留 77MB 的核心 Python 源码。
 
 ```
 tonghuashunAI/
-├── vendor/Qbot/         # 底座：数据/回测/模拟盘/GUI/通知（submodule，不修改）
+├── vendor/Qbot/         # Qbot 源码副本：数据/回测/模拟盘/通知（精简后 77MB）
+├── data_layer/          # 数据层：统一封装 AkShare + 本地 parquet 缓存
 ├── my_strategies/       # 自定义策略
 ├── ai_analysis/         # LLM 情绪分析、每日报告
 ├── configs/             # 股票池、策略参数、密钥模板
@@ -21,8 +24,8 @@ tonghuashunAI/
 ## 快速开始
 
 ```bash
-# 1. 克隆（务必带 --recurse-submodules，把 Qbot 一起拉下来）
-git clone --recurse-submodules https://github.com/defineqq/tonghuashunAI.git
+# 1. 克隆（Qbot 已作为普通目录纳入，无需 --recurse-submodules）
+git clone https://github.com/defineqq/tonghuashunAI.git
 cd tonghuashunAI
 
 # 2. 建虚拟环境（Qbot 要求 Python 3.8 / 3.9）
@@ -30,7 +33,7 @@ python3.9 -m venv .venv
 source .venv/bin/activate
 
 # 3. 装依赖
-pip install -r vendor/Qbot/dev/requirements.txt
+pip install -r vendor/Qbot/requirements.txt
 pip install -r requirements.txt
 
 # 4. 跑最小示例

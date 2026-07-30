@@ -1,4 +1,0 @@
-[submodule "vendor/Qbot"]
-	path = vendor/Qbot
-	url = https://github.com/UFund-Me/Qbot.git
-	branch = main

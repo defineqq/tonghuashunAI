@@ -2,6 +2,22 @@
 
 ## 2026-07-30
 
+### M0.5：Qbot 从 submodule 转为本地副本（+ 精简）
+
+**触发**：用户担心上游停更风险，要求把 Qbot 内容直接下载纳入。
+
+**做了什么**
+- 移除 git submodule 关联，重新以普通目录方式克隆 Qbot 到 `vendor/Qbot/`
+- 精简 Qbot：686 MB → 77 MB（删掉 `.git`、`dev/*.whl`、`docs/tutorials_code/`、`docs/notebook/`、`qbot/plugins/investool/`、`web/`、各类二进制）
+- 保留：完整 Python 源码、策略库、回测引擎、交易适配层、精简文档、LICENSE
+- 新增 `NOTICE.md` 说明源码来源、协议、修改历史（MIT 合规要求）
+- README、.gitignore 相应更新
+
+**为什么这样做**
+- Qbot 作者曾提示"可能停更"，submodule 依赖远端仓库存在风险
+- 精简后仓库仍可独立运行，避免体积失控（GitHub 单仓库软上限 5GB）
+- MIT 允许保留 + 修改 + 商用，只需保留版权声明
+
 ### M0：初始化仓库 + 引入 Qbot 底座 ✅
 
 **做了什么**

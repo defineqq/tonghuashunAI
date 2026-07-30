@@ -54,7 +54,7 @@ models/*.ckpt
 configs/secrets.yaml
 configs/*.local.yaml
 
-# --- Qbot submodule 内部的数据/缓存目录（避免污染） ---
+# --- Qbot 副本内部的运行时数据/缓存（源码本身入库，但运行时产物不入库） ---
 vendor/Qbot/data/
 vendor/Qbot/logs/
 vendor/Qbot/cache/
