@@ -15,8 +15,9 @@ data_layer — 统一数据接口层
 用法：
     from data_layer import market
     df = market.daily("600519", start="2024-01-01", end="2024-12-31")
+
+注意：这里刻意不做 eager import（子模块依赖 akshare，导入代价较高）。
+用户按需 `from data_layer import market` 即可。
 """
 
-from data_layer import market, fundamental, moneyflow, sentiment, universe  # noqa: F401
-
-__all__ = ["market", "fundamental", "moneyflow", "sentiment", "universe"]
+__all__ = ["market", "fundamental", "moneyflow", "sentiment", "universe", "cache"]

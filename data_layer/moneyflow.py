@@ -11,7 +11,6 @@
 
 from __future__ import annotations
 
-import akshare as ak
 import pandas as pd
 
 from data_layer.cache import cached
@@ -25,6 +24,7 @@ def northbound_daily() -> pd.DataFrame:
     Returns:
         columns: date, net_inflow_yi (亿元), sh_net, sz_net
     """
+    import akshare as ak
     df = ak.stock_hsgt_hist_em(symbol="北向资金")
     return df
 
@@ -34,6 +34,7 @@ def northbound_holdings(symbol: str) -> pd.DataFrame:
     """
     单只个股的北向资金持仓变化（陆股通每日持股）。
     """
+    import akshare as ak
     return ak.stock_hsgt_individual_em(stock=symbol)
 
 
@@ -46,6 +47,7 @@ def stock_moneyflow(symbol: str) -> pd.DataFrame:
         columns: date, close, pct_change, main_net (主力净流入), main_net_pct,
                  super_large, large, medium, small
     """
+    import akshare as ak
     # AkShare 需要 sh/sz 前缀
     market_prefix = "sh" if symbol.startswith("6") else "sz"
     return ak.stock_individual_fund_flow(stock=symbol, market=market_prefix)
@@ -56,4 +58,5 @@ def sector_moneyflow() -> pd.DataFrame:
     """
     今日板块资金流排行（申万一级行业）。
     """
+    import akshare as ak
     return ak.stock_sector_fund_flow_rank(indicator="今日", sector_type="行业资金流")

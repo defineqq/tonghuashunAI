@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import akshare as ak
 import pandas as pd
 import yaml
 
@@ -19,18 +18,21 @@ from data_layer.cache import cached
 @cached("universe", max_age_hours=24)
 def hs300_constituents() -> pd.DataFrame:
     """沪深 300 成分股。columns: 代码, 名称, 纳入日期, 权重（如可用）。"""
+    import akshare as ak
     return ak.index_stock_cons_csindex(symbol="000300")
 
 
 @cached("universe", max_age_hours=24)
 def csi500_constituents() -> pd.DataFrame:
     """中证 500 成分股。"""
+    import akshare as ak
     return ak.index_stock_cons_csindex(symbol="000905")
 
 
 @cached("universe", max_age_hours=24)
 def csi1000_constituents() -> pd.DataFrame:
     """中证 1000 成分股。"""
+    import akshare as ak
     return ak.index_stock_cons_csindex(symbol="000852")
 
 

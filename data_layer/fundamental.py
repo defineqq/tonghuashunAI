@@ -7,7 +7,6 @@
 
 from __future__ import annotations
 
-import akshare as ak
 import pandas as pd
 
 from data_layer.cache import cached
@@ -21,6 +20,7 @@ def valuation(symbol: str) -> pd.DataFrame:
     Returns:
         columns: trade_date, pe, pb, ps, dv_ratio, total_mv (亿元)
     """
+    import akshare as ak
     df = ak.stock_a_indicator_lg(symbol=symbol)
     # AkShare 列名会随版本变，做兼容
     rename = {
@@ -45,6 +45,7 @@ def financial_abstract(symbol: str) -> pd.DataFrame:
     Args:
         symbol: 6 位代码
     """
+    import akshare as ak
     return ak.stock_financial_abstract(symbol=symbol)
 
 
@@ -56,6 +57,7 @@ def industry_of(symbol: str) -> dict[str, str]:
     Returns:
         {"industry_l1": "...", "industry_l2": "...", "industry_l3": "..."}
     """
+    import akshare as ak
     df = ak.stock_individual_info_em(symbol=symbol)
     kv = dict(zip(df["item"], df["value"]))
     return {

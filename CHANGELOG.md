@@ -2,6 +2,29 @@
 
 ## 2026-07-30
 
+### M1.5：三维度评分器 + 完整项目手册 ✅
+
+**做了什么**
+- 新增 `analysis/` Python 包
+  - `technical.py`：技术面评分（均线多头/动量/RSI/量能/波动率 5 子项）
+  - `fundamental_score.py`：基本面评分（估值分位/ROE/增长 3 子项）
+  - `moneyflow_score.py`：资金面评分（北向变化/主力净流入/换手 3 子项）
+  - `scorer.py`：综合打分 + 排名，读取 `configs/strategy.yaml` 权重
+- 新增 `examples/rank_hs300.py`：从沪深 300 选综合分 Top N 的完整示例
+- 单元测试：`analysis/tests/test_technical.py`（3 个用例）
+- 重构 data_layer/analysis 为按需 import（避免 pytest 时强制依赖 akshare）
+- 跑通 pytest：7 个测试全绿
+
+**关键决策**
+- 情绪面（sentiment）暂返回中性 50 分，M2 阶段用 LLM 填充；这样 M1.5 阶段的选股逻辑仍可完整跑通
+- 所有评分都是**相对分位**而非绝对判定，避免因子失效
+- 综合打分权重可通过 YAML 调整，不用改代码
+
+### README 大改
+- 按用户要求，把 README 重写为完整的项目手册
+- 包含：能力矩阵、项目结构、启动步骤、常用命令、配置说明、路线图、免责声明
+- 常见依赖问题（TA-Lib、wxPython、pip 源）都写了 workaround
+
 ### M1：数据层封装 ✅
 
 **做了什么**

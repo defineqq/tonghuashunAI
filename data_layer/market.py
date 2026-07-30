@@ -10,7 +10,6 @@
 
 from __future__ import annotations
 
-import akshare as ak
 import pandas as pd
 
 from data_layer.cache import cached
@@ -49,6 +48,7 @@ def daily(
         DataFrame with columns: date, open, high, low, close, volume, amount, pct_change, turnover_rate
         index=RangeIndex, date 是 datetime64[ns] 类型
     """
+    import akshare as ak
     raw = ak.stock_zh_a_hist(
         symbol=symbol,
         period="daily",
@@ -75,6 +75,7 @@ def minute(
 
     注意：AkShare 分钟线数据 <= 5 年，早期数据可能没有。
     """
+    import akshare as ak
     raw = ak.stock_zh_a_hist_min_em(
         symbol=symbol,
         start_date=f"{start} 09:30:00",
@@ -90,4 +91,5 @@ def minute(
 @cached("market", max_age_hours=0.1)  # 6 分钟缓存，避免频繁请求
 def snapshot() -> pd.DataFrame:
     """全 A 实时快照（收盘价、涨跌幅、成交量、市值等）。"""
+    import akshare as ak
     return ak.stock_zh_a_spot_em()
