@@ -1,0 +1,67 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+build/
+dist/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# --- 虚拟环境 ---
+.venv/
+venv/
+env/
+.python-version
+
+# --- IDE ---
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# --- Jupyter ---
+.ipynb_checkpoints/
+*.ipynb_meta
+
+# --- 项目数据 & 日志（大文件、可重生成、含敏感信息，都不入库） ---
+data/
+!data/.gitkeep
+logs/
+!logs/.gitkeep
+cache/
+*.log
+*.csv
+*.parquet
+*.h5
+*.feather
+*.pkl
+
+# --- 模型产物 ---
+models/*.bin
+models/*.pt
+models/*.onnx
+models/*.ckpt
+
+# --- 敏感配置：token / 账号密码 / API key ---
+.env
+.env.*
+!.env.example
+configs/secrets.yaml
+configs/*.local.yaml
+
+# --- Qbot submodule 内部的数据/缓存目录（避免污染） ---
+vendor/Qbot/data/
+vendor/Qbot/logs/
+vendor/Qbot/cache/
+vendor/Qbot/**/__pycache__/
+
+# --- 其他 ---
+.pytest_cache/
+.coverage
+htmlcov/
+*.tmp

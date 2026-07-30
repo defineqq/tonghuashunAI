@@ -1,0 +1,31 @@
+# 策略参数（M2 阶段生效，目前占位）
+
+swing_v1:
+  # 择时
+  ma_short: 5
+  ma_long: 20
+  rsi_period: 14
+  rsi_oversold: 30
+  rsi_overbought: 70
+
+  # 选股：四维度评分权重（合计 = 1.0）
+  weights:
+    technical: 0.35        # 技术面
+    fundamental: 0.20      # 基本面
+    sentiment: 0.20        # 情绪面（新闻/公告，LLM 分析）
+    moneyflow: 0.25        # 资金面（北向+主力）
+  top_n: 10                # 每日选出评分前 N 只作为候选
+
+  # 仓位与风控
+  max_positions: 5         # 最多同时持有 N 只
+  position_size: 0.18      # 单只最大仓位（占总资金比例，留 10% 现金）
+  stop_loss_pct: 0.05      # 单只止损：亏 5% 强平
+  take_profit_pct: 0.15    # 单只止盈：赚 15% 减半
+  max_hold_days: 10        # 最长持有 N 天，超过强平（避免长期套牢）
+
+# 回测参数
+backtest:
+  start_cash: 100000
+  commission: 0.001        # 万分之一佣金（券商差异大，粗估）
+  stamp_tax: 0.001         # 千分之一印花税（仅卖方）
+  slippage: 0.001          # 千分之一滑点

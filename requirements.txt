@@ -1,0 +1,19 @@
+# tonghuashunAI 的增量依赖
+# 基础依赖装 vendor/Qbot/dev/requirements.txt，这里只列 Qbot 未涵盖或版本要求不同的
+# 装法：
+#   pip install -r vendor/Qbot/dev/requirements.txt
+#   pip install -r requirements.txt
+
+# 数据源（Qbot 已依赖 akshare，此处显式钉版本以免下游变动）
+akshare>=1.12.0
+
+# 回测（Qbot 已依赖 backtrader）
+backtrader>=1.9.76.123
+
+# 用于配置文件
+pyyaml>=6.0
+
+# 后续 AI 情绪分析层会用到（先不装，M2 阶段再打开）
+# anthropic>=0.34.0
+# openai>=1.40.0
+# httpx>=0.27.0

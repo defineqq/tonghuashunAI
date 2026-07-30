@@ -1,0 +1,41 @@
+# CHANGELOG
+
+## 2026-07-30
+
+### M0：初始化仓库 + 引入 Qbot 底座 ✅
+
+**做了什么**
+- 创建 GitHub 私有仓库 `defineqq/tonghuashunAI`
+- 用 git submodule 引入 [Qbot](https://github.com/UFund-Me/Qbot)（1.8w⭐, MIT）到 `vendor/Qbot/`
+- 建目录骨架：`my_strategies/` `ai_analysis/` `configs/` `examples/` `scripts/` `data/` `logs/`
+- 写好 `.gitignore`（排除数据、日志、密钥、缓存）
+- 写好 `README.md`、`.env.example`、`requirements.txt`
+- 配置文件占位：`configs/stock_pool.yaml`（默认沪深 300）、`configs/strategy.yaml`（波段策略参数）
+- 最小验证示例：`examples/hello_qbot.py`（用 AkShare 拉贵州茅台日线 + Qbot 的 15 日均线策略回测）
+
+**关键决策**
+- **不 fork Qbot**：Qbot 更新频繁，fork 后追不上；submodule 保留干净的上游链接
+- **submodule 用浅克隆**（`--depth 1`）：Qbot 仓库 380MB，浅克隆只拉最新代码，快
+- **数据源选 AkShare 不选 Tushare**：AkShare 免费无 key，用户零门槛就能跑；Tushare 需注册 + 积分制
+- **股票池默认沪深 300**：数据干净、覆盖主流、约 300 只规模可控
+- **不引入 easytrader**：easytrader 是 UI 自动化实盘下单，风险高且违反券商协议；本项目定位模拟盘，不需要
+- **Python 版本要求 3.8/3.9**：Qbot 硬约束（README 明写），后续建虚拟环境需注意
+
+**待验证 / 待处理**
+- 本地环境目前 Python 版本未确认，`examples/hello_qbot.py` 未实际跑过（用户睡了，不想装依赖打扰他）
+- Qbot 依赖里有 wxPython/TA-Lib 等重依赖，可能需要系统包，等实际装的时候再处理
+- Tushare token 未配置（当前用 AkShare 不需要）
+- LLM API key 未配置（M2 才用到）
+
+### 下一步计划（M1）
+- 抽出数据层：封装 AkShare 拉取行情/基本面/资金流/龙虎榜的统一接口
+- 加本地 parquet 缓存，避免每次跑都重新拉
+- 单元测试基础数据接口
+
+### 再下一步计划（M2）
+- AI 情绪分析层：LLM 分析新闻/公告文本，输出情绪评分（等用户确认用哪家 LLM 服务）
+- 需要用户提供：`ANTHROPIC_API_KEY` 或 `DEEPSEEK_API_KEY` 之一
+
+---
+
+_本 CHANGELOG 由 Claude 在用户睡觉时自动维护，用户可随时查阅进度。_
