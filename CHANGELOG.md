@@ -1,5 +1,76 @@
 # CHANGELOG
 
+## M8.9：AI 自主研究员 + 长任务全部持久化（复盘不丢失）
+
+**用户诉求**
+- 刷新页面后未完成的选股/回测/AI 任务不能消失
+- 未完成的任务应该能"停止"
+- 应该能看到"跑到哪一步了"，AI 每一步的思考要实时显示，不然像死机
+- 需要 Markdown 复盘报告，中途停止也能查看进展
+
+**做了什么**
+
+### 1. 长任务全部任务化 + 持久化
+- 新增 `backtest/tasks.py`：BacktestTask 持久化到 `logs/backtest_tasks/*.json`，
+  `engine.run` 接 `progress_cb` 每日回调，任务化后台跑
+- Agent Task 已有 `logs/agent_tasks/*.json`（M8.7），本次加了 `cancel_task()`
+- 前端所有长任务：3 个新端点（`GET /api/{...}/tasks` 列表 / `GET /{id}` 详情 / `POST /{id}/cancel` 取消）
+- 页面加载时 `autoResumeRunningAgent()` / `autoResumeRunningBacktest()` 自动接回 running 任务
+
+### 2. AI Agent 实时思考 + Markdown 复盘
+- 每一轮开始就写一个 phase=`thinking` 占位 step 到磁盘 → 前端 1.5s 刷新立刻看到"AI 正在思考"，不会以为死机
+- LLM 返回后 phase 转 `executing` → 工具跑完转 `done` / `failed`
+- Task.save() 同步写 `logs/agent_tasks/{id}.md`：完整决策过程 + 每步 config/metrics + 最终结论 + 备选方案
+- 新端点 `GET /api/agent/{id}/markdown` + `GET /api/agent/{id}/download`
+- 前端「📄 复盘报告」按钮：弹窗渲染 markdown（marked.js）+ 下载 .md
+
+### 3. 首页选股 localStorage 缓存
+- 每次筛选完把 HTML + 权重上下文写 `localStorage.screen_last_result`
+- 页面加载时自动回填，最上方显示"上次筛选结果 · 时间戳"+ 清除按钮，24 小时过期
+
+### 4. 静态资源禁缓存
+- `NoCacheStaticMiddleware` 给所有 `/static/*` 和 `/` 加 `Cache-Control: no-cache, no-store`
+- 引用 `app.js?v=Date.now()` cache-buster，配合服务端头彻底解决"改完 UI 用户看到旧版"
+
+**新增测试（+19，总 78→97）**
+- `backtest/tests/test_tasks.py` × 6：成功 / 失败 / 取消抛 BacktestCancelled / 已完成任务不可再取消
+- `ai_analysis/tests/test_agent_cancel.py` × 4：cancel running/done/nonexistent；循环内检测外部 cancel 立即退出
+- `ai_analysis/tests/test_agent_markdown.py` × 6：占位 step 在 LLM 返回前已写盘；Markdown 反映各 phase；错误/回测/final 结论都进 md
+
+---
+
+## M8.7：AI 版条件构建器（自然语言 → 策略 JSON）
+
+用户在策略实验室的条件构建器里，可以用一句中文描述策略思路，LLM 会解析成合法的规则 JSON 填到表单。
+
+- 新增 `ai_analysis/builder_ai.py` + `prompts/builder_ai.md`：把 21 个指标目录（含 params/ops/value_type）完整注入 prompt，附少样本示例
+- 新端点 `POST /api/strategies/builder/from_ai`（`save=true` 时校验通过直接注册到 registry）
+- 前端条件构建器顶部加渐变色 AI 助手卡：Textarea + LLM 徽章 + 「生成到表单」+「生成并直接保存」
+- 无 LLM key 走 stub，返回通用 MA 金叉+放量示例，链路不断
+- 8 个单测（stub / markdown 代码块剥离 / mock LLM 端到端 / 非法 indicator 被拒 / 目录完整性）
+
+---
+
+## M8.5：个股分析显示权重占比+计算过程；全 A 股筛选；条件构建器扩充到 21 指标
+
+**用户诉求**
+- 从选股页跳到个股分析时，要说清"本次打分是根据什么占比"以及"总分是怎么算的"
+- 股票池要能从全 A 筛选，不局限于沪深 300/500/1000
+
+**做了什么**
+- `/api/score` 支持 `preset`/`custom_weights` 参数，返回 `weights_source` 元信息
+- 个股分析页三块可视化：
+  - 顶部「权重来源：自定义/动量型/…」徽章
+  - 「本次打分使用的权重占比」四色权重条 + 公式
+  - 每个维度展开子项明细（技术 5 项/基本 3 项/资金 3 项，每项打分规则说明）
+  - 底栏「🧮 综合分是这么算出来的」用真实数字复现：79.7×50% + 50×10% + 50×10% + 32×30% = 59.44
+- 股票池新增 `🌐 全 A 股`：AkShare `stock_zh_a_spot_em` 快照
+  - 过滤面板：交易所（沪/深/北 · 主板/科创/创业）/ 股价区间 / 总市值区间 / 排除 ST
+  - `market.snapshot()` 三源回退：东财 → 新浪（列名映射+代码剥离）→ 分交易所拼接
+- 条件构建器指标从 7 个扩到 21 个：MA/EMA/MACD/RSI/KDJ/BOLL/CCI/W%R/OBV/CR/PSY/成交量/成交额/换手率/涨跌幅/振幅/连涨/连跌/筹码集中度/多头排列/新高新低（61 个操作组合）
+
+---
+
 ## M7：Web UI 重设计 + 关键 bug 修复（面向普通用户）
 
 **用户反馈**：老 UI 太丑、功能怎么用不清楚、每日报告失败、缺少策略设置界面。

@@ -52,7 +52,7 @@ def test_finish_terminates_loop(monkeypatch):
             "summary": "找到了",
         }}
     ])
-    monkeypatch.setattr(agent_loop, "_ask_llm", lambda t: next(decisions))
+    monkeypatch.setattr(agent_loop, "_ask_llm", lambda t: (next(decisions), "fake raw"))
     task = agent_loop.AgentTask(
         task_id="test1", goal="示例", max_iterations=5,
         started_at="now", provider="claude",
@@ -69,7 +69,7 @@ def test_max_iterations_forced_stop(monkeypatch):
     _stub_provider(monkeypatch)
     # 反复 list_strategies
     monkeypatch.setattr(agent_loop, "_ask_llm",
-                        lambda t: {"action": "list_strategies", "reason": "repeat", "args": {}})
+                        lambda t: ({"action": "list_strategies", "reason": "repeat", "args": {}}, "fake raw"))
     # 别真的去列策略
     monkeypatch.setitem(agent_loop.ACTIONS, "list_strategies",
                         lambda args: {"strategies": []})
@@ -90,7 +90,7 @@ def test_unknown_action_recorded_as_error(monkeypatch):
         {"action": "nonsense", "reason": "?", "args": {}},
         {"action": "finish", "reason": "算了", "args": {"summary": "放弃"}},
     ])
-    monkeypatch.setattr(agent_loop, "_ask_llm", lambda t: next(decisions))
+    monkeypatch.setattr(agent_loop, "_ask_llm", lambda t: (next(decisions), "fake raw"))
     task = agent_loop.AgentTask(
         task_id="test3", goal="示例", max_iterations=5,
         started_at="now", provider="claude",
@@ -124,7 +124,7 @@ def test_backtest_action_error_recorded(monkeypatch):
         }},
         {"action": "finish", "reason": "结束", "args": {"summary": "回测失败了，只能作罢"}},
     ])
-    monkeypatch.setattr(agent_loop, "_ask_llm", lambda t: next(decisions))
+    monkeypatch.setattr(agent_loop, "_ask_llm", lambda t: (next(decisions), "fake raw"))
     def failing(args): raise RuntimeError("simulated failure")
     monkeypatch.setitem(agent_loop.ACTIONS, "backtest_score", failing)
     task = agent_loop.AgentTask(
@@ -140,8 +140,8 @@ def test_backtest_action_error_recorded(monkeypatch):
 def test_task_persistence_and_load(monkeypatch):
     _stub_provider(monkeypatch)
     monkeypatch.setattr(agent_loop, "_ask_llm",
-                        lambda t: {"action": "finish", "reason": "ok",
-                                   "args": {"summary": "s"}})
+                        lambda t: ({"action": "finish", "reason": "ok",
+                                    "args": {"summary": "s"}}, "fake raw"))
     task = agent_loop.AgentTask(
         task_id="persist1", goal="?", max_iterations=2,
         started_at="now", provider="claude",
@@ -173,7 +173,7 @@ def test_stub_provider_returns_deterministic(monkeypatch):
 def test_list_tasks_returns_recent(monkeypatch, isolate_tasks_dir):
     _stub_provider(monkeypatch)
     monkeypatch.setattr(agent_loop, "_ask_llm",
-                        lambda t: {"action": "finish", "args": {"summary": "s"}, "reason": ""})
+                        lambda t: ({"action": "finish", "args": {"summary": "s"}, "reason": ""}, "fake raw"))
     for i in range(3):
         t = agent_loop.AgentTask(
             task_id=f"list{i}", goal=f"goal{i}", max_iterations=2,

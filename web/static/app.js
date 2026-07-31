@@ -926,9 +926,9 @@ window.startAgent = async function() {
     document.getElementById('agent-task-id').textContent = r.task_id;
     document.getElementById('agent-panel').classList.remove('hidden');
     status.innerHTML = `<span class="text-emerald-600">✓ 任务已启动，AI (${r.provider}) 正在思考...</span>`;
-    // 3 秒后开始轮询
+    // 1.5 秒轮询：LLM 思考中也能看到最新占位 step
     if (window._agentPollTimer) clearInterval(window._agentPollTimer);
-    window._agentPollTimer = setInterval(refreshAgent, 3000);
+    window._agentPollTimer = setInterval(refreshAgent, 1500);
     refreshAgent();
   } catch (e) {
     status.innerHTML = `<span class="text-red-500">失败: ${e.message}</span>`;
@@ -964,6 +964,28 @@ window.refreshAgent = async function() {
   } catch (e) {
     console.warn('agent poll error', e);
   }
+};
+
+window.viewAgentMarkdown = async function() {
+  const id = window._agentCurrentTaskId;
+  if (!id) return;
+  const modal = document.getElementById('agent-md-modal');
+  const content = document.getElementById('agent-md-content');
+  const dl = document.getElementById('agent-md-download');
+  modal.classList.remove('hidden');
+  content.innerHTML = '<div class="text-slate-400 text-center py-8"><span class="spinner"></span> 加载中...</div>';
+  dl.href = `/api/agent/${id}/download`;
+  try {
+    const r = await API(`/agent/${id}/markdown`);
+    // marked 已在 index.html 里加载
+    content.innerHTML = window.marked ? window.marked.parse(r.markdown) : `<pre>${r.markdown}</pre>`;
+  } catch (e) {
+    content.innerHTML = `<div class="text-red-500">加载失败: ${e.message}</div>`;
+  }
+};
+
+window.closeAgentMarkdown = function() {
+  document.getElementById('agent-md-modal').classList.add('hidden');
 };
 
 window.stopAgent = async function() {
@@ -1019,7 +1041,7 @@ window.attachAgentTask = function(taskId) {
   API(`/agent/${taskId}`).then(t => {
     if (t.status === 'running') {
       if (window._agentPollTimer) clearInterval(window._agentPollTimer);
-      window._agentPollTimer = setInterval(refreshAgent, 3000);
+      window._agentPollTimer = setInterval(refreshAgent, 1500);
     }
   });
 };
@@ -1032,46 +1054,68 @@ function renderAgentSteps(t) {
     backtest_technical: 'bg-emerald-100 text-emerald-700',
     create_strategy_from_text: 'bg-purple-100 text-purple-700',
     finish: 'bg-amber-100 text-amber-800',
+    thinking: 'bg-indigo-100 text-indigo-700',
+    llm_error: 'bg-red-100 text-red-700',
+  };
+  const phaseHint = {
+    thinking: '<span class="spinner"></span> <span class="text-indigo-600">正在思考 · 等待 LLM 决策</span>',
+    executing: '<span class="spinner"></span> <span class="text-blue-600">决策已得出，正在执行工具</span>',
+    done: '',
+    failed: '',
+  };
+  const phaseBorder = {
+    thinking: 'border-indigo-300 bg-indigo-50/30 animate-pulse',
+    executing: 'border-blue-300 bg-blue-50/30',
+    done: 'border-slate-200 bg-white',
+    failed: 'border-red-200 bg-red-50/40',
   };
   el.innerHTML = t.steps.map(s => {
     const badge = actionColors[s.action] || 'bg-slate-100 text-slate-700';
+    const phase = s.phase || 'done';
+    const borderCls = phaseBorder[phase] || 'border-slate-200 bg-white';
     let body = '';
+    if (phase === 'thinking') {
+      body = `<div class="text-xs text-indigo-700 mt-1">${phaseHint.thinking}</div>`;
+    } else if (phase === 'executing') {
+      body = `<div class="text-xs text-blue-700 mt-1">${phaseHint.executing}</div>`;
+    }
     if (s.error) {
-      body = `<div class="text-xs text-red-600 mt-1">❌ ${s.error}</div>`;
+      body += `<div class="text-xs text-red-600 mt-1">❌ ${s.error}</div>`;
     } else if (s.action === 'backtest_score' || s.action === 'backtest_technical') {
       const m = s.result?.metrics || {};
       const cfg = s.result?.config || {};
-      body = `
-        <div class="text-xs text-slate-600 mt-1">
-          <b>配置：</b>${JSON.stringify(cfg, null, 0)}
-        </div>
-        <div class="mt-1 flex flex-wrap gap-3 text-xs">
-          <span>累计: <b class="${(m.cumulative_return||0)>=0?'text-red-600':'text-emerald-600'}">${((m.cumulative_return||0)*100).toFixed(1)}%</b></span>
-          <span>年化: <b>${((m.annualized_return||0)*100).toFixed(1)}%</b></span>
-          <span>回撤: <b class="text-emerald-600">-${((m.max_drawdown||0)*100).toFixed(1)}%</b></span>
-          <span>夏普: <b>${(m.sharpe||0).toFixed(2)}</b></span>
-          <span>成交: <b>${s.result?.trades_count||0}</b></span>
-        </div>
-      `;
+      if (Object.keys(m).length) {
+        body += `
+          <div class="text-xs text-slate-600 mt-1">
+            <b>配置：</b>${JSON.stringify(cfg, null, 0)}
+          </div>
+          <div class="mt-1 flex flex-wrap gap-3 text-xs">
+            <span>累计: <b class="${(m.cumulative_return||0)>=0?'text-red-600':'text-emerald-600'}">${((m.cumulative_return||0)*100).toFixed(1)}%</b></span>
+            <span>年化: <b>${((m.annualized_return||0)*100).toFixed(1)}%</b></span>
+            <span>回撤: <b class="text-emerald-600">-${((m.max_drawdown||0)*100).toFixed(1)}%</b></span>
+            <span>夏普: <b>${(m.sharpe||0).toFixed(2)}</b></span>
+            <span>成交: <b>${s.result?.trades_count||0}</b></span>
+          </div>
+        `;
+      }
     } else if (s.action === 'list_strategies' && s.result) {
       const n = s.result.strategies?.length || 0;
-      body = `<div class="text-xs text-slate-600 mt-1">拿到 ${n} 个策略</div>`;
+      body += `<div class="text-xs text-slate-600 mt-1">拿到 ${n} 个策略</div>`;
     } else if (s.action === 'create_strategy_from_text' && s.result) {
-      body = `<div class="text-xs text-slate-600 mt-1">✓ 新建策略 <code>${s.result.strategy_id}</code>：${s.result.notes || ''}</div>`;
+      body += `<div class="text-xs text-slate-600 mt-1">✓ 新建策略 <code>${s.result.strategy_id}</code>：${s.result.notes || ''}</div>`;
     }
     return `
-      <div class="border border-slate-200 rounded p-3 bg-white">
+      <div class="border rounded p-3 transition-all ${borderCls}">
         <div class="flex items-center gap-2">
           <span class="text-xs text-slate-400 font-mono">#${s.idx}</span>
           <span class="text-xs px-2 py-0.5 rounded ${badge} font-medium">${s.action}</span>
-          <span class="text-xs text-slate-400 ml-auto">${s.duration_ms}ms · ${s.at.split('T')[1] || ''}</span>
+          <span class="text-xs text-slate-400 ml-auto">${s.duration_ms||0}ms · ${(s.at||'').split('T')[1] || ''}</span>
         </div>
         ${s.reason ? `<div class="text-xs text-slate-600 mt-1">💭 ${s.reason}</div>` : ''}
         ${body}
       </div>
     `;
   }).join('') || '<div class="text-sm text-slate-400 p-4 text-center">AI 正在思考中...</div>';
-  // 自动滚动到底部
   el.scrollTop = el.scrollHeight;
 }
 

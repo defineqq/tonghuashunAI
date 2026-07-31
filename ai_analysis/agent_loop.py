@@ -54,6 +54,9 @@ class Step:
     result: dict[str, Any] | None = None   # 成功时的 payload
     error: str | None = None               # 失败时的错误信息
     duration_ms: int = 0
+    # 生命周期：thinking（等 LLM）→ executing（工具跑）→ done | failed
+    phase: str = "done"
+    raw_llm: str | None = None             # LLM 原始回复（截断，用于复盘）
 
 
 @dataclass
@@ -72,6 +75,9 @@ class AgentTask:
     def path(self) -> Path:
         return TASKS_DIR / f"{self.task_id}.json"
 
+    def markdown_path(self) -> Path:
+        return TASKS_DIR / f"{self.task_id}.md"
+
     def save(self):
         with _LOCK:
             data = {
@@ -79,6 +85,132 @@ class AgentTask:
                 "steps": [asdict(s) for s in self.steps],
             }
             self.path().write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            # 每次保存都同步生成 Markdown 报告，用户随时可以打开看
+            try:
+                self.markdown_path().write_text(self.render_markdown(), encoding="utf-8")
+            except Exception:
+                pass  # markdown 生成失败不阻塞主流程
+
+    def render_markdown(self) -> str:
+        status_icon = {
+            "running": "🏃 进行中",
+            "done": "✅ 完成",
+            "failed": "❌ 失败",
+            "cancelled": "⏹ 已取消",
+        }.get(self.status, self.status)
+        lines: list[str] = [
+            f"# AI 研究报告 · {self.task_id}",
+            "",
+            f"- **用户目标**：{self.goal}",
+            f"- **状态**：{status_icon}",
+            f"- **LLM Provider**：{self.provider}",
+            f"- **最大轮数**：{self.max_iterations}",
+            f"- **开始时间**：{self.started_at}",
+        ]
+        if self.finished_at:
+            lines.append(f"- **结束时间**：{self.finished_at}")
+        lines.append(f"- **已跑轮数**：{len(self.steps)}")
+        lines.append("")
+
+        # 最终结论（如果有）
+        if self.final:
+            lines += ["## 🎯 最终结论", ""]
+            summary = self.final.get("summary")
+            if summary:
+                lines.append(summary)
+                lines.append("")
+            best = self.final.get("best")
+            if best:
+                lines += [
+                    "### 推荐配置",
+                    "",
+                    "```json",
+                    json.dumps(best, ensure_ascii=False, indent=2),
+                    "```",
+                    "",
+                ]
+            alts = self.final.get("alternatives") or []
+            if alts:
+                lines += ["### 备选方案", "", "```json",
+                          json.dumps(alts, ensure_ascii=False, indent=2), "```", ""]
+
+        if self.error:
+            lines += ["## ⚠️ 错误", "", "```", self.error, "```", ""]
+
+        # 每一步的详情
+        lines += ["## 📜 决策 & 执行过程", ""]
+        if not self.steps:
+            lines.append("_（还没有步骤）_")
+        for s in self.steps:
+            phase_icon = {
+                "thinking": "💭 正在思考...",
+                "executing": "⚙️ 正在执行...",
+                "done": "✅",
+                "failed": "❌",
+            }.get(s.phase, "•")
+            lines.append(f"### 第 {s.idx} 轮 · `{s.action}` {phase_icon}")
+            lines.append("")
+            lines.append(f"- **时间**：{s.at}")
+            if s.duration_ms:
+                lines.append(f"- **耗时**：{s.duration_ms} ms")
+            if s.reason:
+                lines += ["", "> " + s.reason.replace("\n", "\n> "), ""]
+            if s.args:
+                lines += ["**参数**：", "", "```json",
+                          json.dumps(s.args, ensure_ascii=False, indent=2), "```", ""]
+            if s.error:
+                lines += ["**错误**：", "", "```", s.error, "```", ""]
+            elif s.result:
+                lines.append("**执行结果**：")
+                lines.append("")
+                # 回测类结果特殊处理，其他直接 dump
+                if s.action in ("backtest_score", "backtest_technical"):
+                    m = s.result.get("metrics") or {}
+                    cfg = s.result.get("config") or {}
+                    lines += [
+                        f"- 累计收益：**{m.get('cumulative_return', 0)*100:.2f}%**",
+                        f"- 年化收益：**{m.get('annualized_return', 0)*100:.2f}%**",
+                        f"- 最大回撤：{m.get('max_drawdown', 0)*100:.2f}%",
+                        f"- 夏普：{m.get('sharpe', 0):.2f}",
+                        f"- 成交笔数：{s.result.get('trades_count', 0)}",
+                        "",
+                        "配置：",
+                        "",
+                        "```json",
+                        json.dumps(cfg, ensure_ascii=False, indent=2),
+                        "```",
+                        "",
+                    ]
+                elif s.action == "list_strategies":
+                    strategies = s.result.get("strategies") or []
+                    lines.append(f"拿到 **{len(strategies)}** 个策略：")
+                    lines.append("")
+                    for st in strategies[:20]:
+                        lines.append(f"- `{st['id']}` — {st['name']} ({st.get('kind','?')} / {st.get('category','')})")
+                    if len(strategies) > 20:
+                        lines.append(f"- _...还有 {len(strategies)-20} 个_")
+                    lines.append("")
+                elif s.action == "create_strategy_from_text":
+                    lines += [f"- 新策略 id：`{s.result.get('strategy_id')}`",
+                              f"- 名称：{s.result.get('name')}",
+                              f"- 说明：{s.result.get('notes') or '—'}", ""]
+                else:
+                    lines += ["```json",
+                              json.dumps(s.result, ensure_ascii=False, indent=2)[:2000],
+                              "```", ""]
+            if s.raw_llm:
+                lines += [
+                    "<details><summary>LLM 原始回复</summary>",
+                    "",
+                    "```",
+                    s.raw_llm[:2000],
+                    "```",
+                    "",
+                    "</details>",
+                    "",
+                ]
+            lines.append("")
+        return "\n".join(lines)
 
     @classmethod
     def load(cls, task_id: str) -> Optional["AgentTask"]:
@@ -291,22 +423,29 @@ def _render_history(steps: list[Step]) -> str:
     return "\n".join(lines)
 
 
-def _ask_llm(task: AgentTask) -> dict:
-    """让 LLM 决定下一步动作。"""
+def _ask_llm(task: AgentTask) -> tuple[dict, str]:
+    """让 LLM 决定下一步动作。返回 (decision_dict, raw_llm_reply)。"""
     if current_provider() == "stub":
-        # stub 兜底：跑一次 balanced 打分策略后 finish
-        if not task.steps:
-            return {"action": "backtest_score", "reason": "[stub] 示例调用",
-                    "args": {"start": "2024-01-01", "end": "2024-06-30",
-                             "pool": "000300", "limit": 15, "preset": "balanced",
-                             "min_score": 60}}
-        return {"action": "finish", "reason": "[stub] LLM 未配置，示例结束",
-                "args": {
-                    "best": {"strategy": "stub_example",
-                             "metrics": task.steps[-1].result.get("metrics", {}) if task.steps[-1].result else {}},
-                    "summary": "[stub] 未配置 LLM，只跑了一次示例回测",
-                    "alternatives": [],
-                }}
+        # 判断是否已跑过一次回测（忽略当前占位 thinking step）
+        last_bt = next(
+            (s for s in reversed(task.steps)
+             if s.action in ("backtest_score", "backtest_technical") and s.result),
+            None,
+        )
+        if last_bt is None:
+            d = {"action": "backtest_score", "reason": "[stub] 示例调用",
+                 "args": {"start": "2024-01-01", "end": "2024-06-30",
+                          "pool": "000300", "limit": 15, "preset": "balanced",
+                          "min_score": 60}}
+            return d, "[stub reply]"
+        d = {"action": "finish", "reason": "[stub] LLM 未配置，示例结束",
+             "args": {
+                 "best": {"strategy": "stub_example",
+                          "metrics": last_bt.result.get("metrics", {})},
+                 "summary": "[stub] 未配置 LLM，只跑了一次示例回测",
+                 "alternatives": [],
+             }}
+        return d, "[stub reply]"
 
     prompt = (
         _PROMPT_TMPL
@@ -317,7 +456,7 @@ def _ask_llm(task: AgentTask) -> dict:
     )
     raw = chat(prompt, json_mode=True, max_tokens=1500)
     try:
-        return _extract_json(raw)
+        return _extract_json(raw), raw
     except Exception as e:
         raise ValueError(f"LLM 返回不是合法 JSON：{e}；raw={raw[:200]}")
 
@@ -340,47 +479,68 @@ def _run_loop(task: AgentTask):
             _reload_from_disk(task)
             if task.status != "running":
                 break
-            t0 = time.time()
-            try:
-                decision = _ask_llm(task)
-            except Exception as e:
-                task.error = f"LLM 决策失败: {e}\n{traceback.format_exc()[-800:]}"
-                task.status = "failed"
-                break
 
-            action = decision.get("action")
-            args = decision.get("args", {}) or {}
-            reason = decision.get("reason", "")
-
+            # 立刻插入一个 "thinking" 占位 step，前端能马上看到 AI 在动
             step = Step(
                 idx=len(task.steps) + 1,
                 at=datetime.now().isoformat(timespec="seconds"),
-                action=action or "?",
-                args=args,
-                reason=reason,
+                action="thinking",
+                args={},
+                reason="正在向 LLM 请求下一步决策...",
+                phase="thinking",
             )
             task.steps.append(step)
             task.save()
+            t0 = time.time()
+
+            try:
+                decision, raw_reply = _ask_llm(task)
+            except Exception as e:
+                # 占位 step 转为失败状态，保留可见性
+                step.action = "llm_error"
+                step.phase = "failed"
+                step.error = f"{type(e).__name__}: {str(e)[:200]}"
+                step.duration_ms = int((time.time() - t0) * 1000)
+                task.error = f"LLM 决策失败: {e}\n{traceback.format_exc()[-800:]}"
+                task.status = "failed"
+                task.save()
+                break
+
+            action = decision.get("action") or "?"
+            args = decision.get("args", {}) or {}
+            reason = decision.get("reason", "")
+
+            # 把占位 step 更新为真正的决策 + 执行状态
+            step.action = action
+            step.args = args
+            step.reason = reason
+            step.raw_llm = raw_reply
+            step.phase = "executing"
+            task.save()  # LLM 返回后立刻再存一次，前端能看到决策内容
 
             if action == "finish":
                 task.final = args
                 task.status = "done"
                 task.finished_at = datetime.now().isoformat(timespec="seconds")
                 step.result = {"finished": True}
+                step.phase = "done"
                 step.duration_ms = int((time.time() - t0) * 1000)
                 task.save()
                 break
 
             if action not in ACTIONS:
                 step.error = f"未知 action: {action}"
+                step.phase = "failed"
                 step.duration_ms = int((time.time() - t0) * 1000)
                 task.save()
                 continue
 
             try:
                 step.result = ACTIONS[action](args)
+                step.phase = "done"
             except Exception as e:
                 step.error = f"{type(e).__name__}: {str(e)[:200]}"
+                step.phase = "failed"
             step.duration_ms = int((time.time() - t0) * 1000)
             task.save()
         else:

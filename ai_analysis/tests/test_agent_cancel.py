@@ -54,7 +54,7 @@ def test_loop_respects_external_cancel(monkeypatch):
         # 第 1 轮之后 mark cancelled，第 2 轮不该被调用
         if calls["n"] == 2:
             raise AssertionError("cancel 后不应再问 LLM")
-        return {"action": "list_strategies", "reason": "", "args": {}}
+        return {"action": "list_strategies", "reason": "", "args": {}}, "fake raw"
 
     monkeypatch.setattr(agent_loop, "_ask_llm", fake_ask)
     monkeypatch.setitem(agent_loop.ACTIONS, "list_strategies",

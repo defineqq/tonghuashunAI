@@ -1286,6 +1286,7 @@ def agent_status(task_id: str):
                 "args": s.args, "reason": s.reason,
                 "result": s.result, "error": s.error,
                 "duration_ms": s.duration_ms,
+                "phase": s.phase, "raw_llm": s.raw_llm,
             }
             for s in t.steps
         ],
@@ -1307,3 +1308,35 @@ def agent_cancel(task_id: str):
     if t is None:
         raise HTTPException(404, "任务不存在")
     return {"task_id": t.task_id, "status": t.status}
+
+
+@router.get("/agent/{task_id}/markdown", summary="读 AI 任务的 Markdown 复盘报告")
+def agent_markdown(task_id: str):
+    from ai_analysis.agent_loop import AgentTask
+    t = AgentTask.load(task_id)
+    if t is None:
+        raise HTTPException(404, "任务不存在")
+    p = t.markdown_path()
+    if not p.exists():
+        # 兜底：如果文件不在（老任务），实时生成一次
+        return {"markdown": t.render_markdown(), "path": None}
+    return {"markdown": p.read_text(encoding="utf-8"), "path": str(p)}
+
+
+@router.get("/agent/{task_id}/download", summary="下载 AI 任务的 Markdown 报告")
+def agent_markdown_download(task_id: str):
+    from fastapi.responses import Response
+    from ai_analysis.agent_loop import AgentTask
+    t = AgentTask.load(task_id)
+    if t is None:
+        raise HTTPException(404, "任务不存在")
+    p = t.markdown_path()
+    if p.exists():
+        content = p.read_text(encoding="utf-8")
+    else:
+        content = t.render_markdown()
+    return Response(
+        content=content,
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="agent_{task_id}.md"'},
+    )

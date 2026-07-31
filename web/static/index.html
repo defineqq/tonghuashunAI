@@ -338,10 +338,28 @@
           <span>已用轮数: <span id="agent-step-count">0</span></span>
           <span id="agent-status-pill" class="ml-2"></span>
           <button onclick="refreshAgent()" class="ml-auto text-xs px-2 py-1 bg-slate-100 rounded hover:bg-slate-200">🔄 刷新</button>
+          <button onclick="viewAgentMarkdown()" class="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200">📄 复盘报告</button>
           <button id="agent-stop-btn" onclick="stopAgent()" class="text-xs px-2 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200 hidden">⏹ 停止任务</button>
         </div>
         <div id="agent-log" class="space-y-2 max-h-96 overflow-auto"></div>
         <div id="agent-final" class="hidden mt-4 p-4 bg-emerald-50 border border-emerald-200 rounded"></div>
+      </div>
+
+      <!-- Markdown 复盘报告弹窗 -->
+      <div id="agent-md-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+        <div class="bg-white rounded-xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl">
+          <div class="flex items-center justify-between px-5 py-3 border-b border-slate-200">
+            <div>
+              <div class="text-lg font-semibold">📄 AI 研究报告</div>
+              <div class="text-xs text-slate-500">实时更新，任务运行中或结束后都可查看</div>
+            </div>
+            <div class="flex items-center gap-2">
+              <a id="agent-md-download" class="text-sm text-blue-600 hover:underline" download>⬇ 下载 .md</a>
+              <button onclick="closeAgentMarkdown()" class="text-slate-400 hover:text-slate-700 text-xl">✕</button>
+            </div>
+          </div>
+          <div id="agent-md-content" class="prose max-w-none p-6 overflow-auto flex-1"></div>
+        </div>
       </div>
 
       <!-- 历史 AI 任务 -->
