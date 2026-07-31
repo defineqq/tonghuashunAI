@@ -48,6 +48,16 @@ document.querySelectorAll('.lab-subtab').forEach(btn => {
 });
 
 // Backtest strategy type toggle
+function _applyBtType(type) {
+  window.btStrategyType = type;
+  document.getElementById('bt-desc-score').classList.toggle('hidden', type !== 'score');
+  document.getElementById('bt-params-score').classList.toggle('hidden', type !== 'score');
+  document.getElementById('bt-desc-technical').classList.toggle('hidden', type !== 'technical');
+  document.getElementById('bt-params-technical').classList.toggle('hidden', type !== 'technical');
+  // 综合分下限只对打分策略生效，技术策略下隐藏避免混淆
+  const wrap = document.getElementById('bt-min-score-wrap');
+  if (wrap) wrap.classList.toggle('hidden', type !== 'score');
+}
 document.querySelectorAll('.bt-type').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('.bt-type').forEach(b => {
@@ -56,15 +66,12 @@ document.querySelectorAll('.bt-type').forEach(btn => {
     });
     btn.classList.add('active', 'border-blue-500', 'bg-blue-50', 'text-blue-700');
     btn.classList.remove('border-slate-200', 'text-slate-700');
-    const type = btn.dataset.type;
-    window.btStrategyType = type;
-    document.getElementById('bt-desc-score').classList.toggle('hidden', type !== 'score');
-    document.getElementById('bt-params-score').classList.toggle('hidden', type !== 'score');
-    document.getElementById('bt-desc-technical').classList.toggle('hidden', type !== 'technical');
-    document.getElementById('bt-params-technical').classList.toggle('hidden', type !== 'technical');
+    _applyBtType(btn.dataset.type);
   });
 });
 window.btStrategyType = 'score';
+// 初始化时同步一次可见性
+setTimeout(() => _applyBtType('score'), 0);
 
 // -------- Status --------
 async function refreshStatus() {
@@ -835,15 +842,17 @@ async function runBacktest() {
   const end = document.getElementById('bt-end').value;
   const pool = document.getElementById('bt-pool').value;
   const limit = parseInt(document.getElementById('bt-limit').value) || 20;
-  const minScore = parseFloat(document.getElementById('bt-min-score').value) || 0;
   if (!start || !end) return alert('请选择起止日期');
   const btn = document.getElementById('bt-btn');
   const status = document.getElementById('bt-status');
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span> 回测中...';
 
-  // 组装 body
-  const body = { start, end, pool, limit, initial_cash: 100000, min_score: minScore };
+  // 组装 body。综合分下限只在打分策略下有意义
+  const body = { start, end, pool, limit, initial_cash: 100000 };
+  if (window.btStrategyType !== 'technical') {
+    body.min_score = parseFloat(document.getElementById('bt-min-score').value) || 0;
+  }
   if (window.btStrategyType === 'technical') {
     const id = document.getElementById('bt-strategy-id').value;
     if (!id) { alert('请选择技术策略'); btn.disabled = false; btn.textContent = '开始回测'; return; }

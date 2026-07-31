@@ -465,15 +465,20 @@
           </div>
           <input id="bt-limit" type="number" value="20" class="field">
         </div>
-        <div>
+        <div id="bt-min-score-wrap">
           <div class="label flex items-center gap-1">
             综合分下限
             <span class="info relative">
               <span class="text-slate-400">ⓘ</span>
-              <span class="tip">买入门槛。设 65 表示只买综合分 ≥ 65 的股票。设 0 就是每天都买 Top 5。</span>
+              <span class="tip">
+                <b>只对打分策略生效。</b><br>
+                综合分 = 技术面×w₁ + 基本面×w₂ + 情绪面×w₃ + 资金面×w₃，四个维度各按<b>上面选的选股风格</b>加权求和（0-100）。<br>
+                设 65 表示只买综合分 ≥ 65 的股票，达不到不买。设 0 就是每天都买 Top 5。
+              </span>
             </span>
           </div>
           <input id="bt-min-score" type="number" value="65" min="0" max="100" class="field">
+          <div class="text-[11px] text-slate-400 mt-1">分数来自每日四维打分，权重跟随「选股风格」</div>
         </div>
       </div>
 
