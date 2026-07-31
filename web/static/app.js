@@ -27,7 +27,8 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     document.getElementById(`tab-${btn.dataset.tab}`).classList.remove('hidden');
     if (btn.dataset.tab === 'settings') loadSettings();
     if (btn.dataset.tab === 'strategies') loadStrategiesLab();
-    if (btn.dataset.tab === 'backtest') loadBacktestStrategies();
+    if (btn.dataset.tab === 'backtest') { loadBacktestStrategies(); loadBacktestHistory(); }
+    if (btn.dataset.tab === 'portfolio') { loadAgentHistory(); autoResumeRunningAgent(); }
   });
 });
 
@@ -309,6 +310,31 @@ window.closePresetHelp = function() {
 
 loadPresets();
 
+// 页面加载时：恢复上一次的筛选结果（如果 24 小时内的）
+(function restoreLastScreen() {
+  try {
+    const raw = localStorage.getItem('screen_last_result');
+    if (!raw) return;
+    const saved = JSON.parse(raw);
+    if (!saved.at || !saved.resultHtml) return;
+    const ageHr = (Date.now() - new Date(saved.at).getTime()) / 3_600_000;
+    if (ageHr > 24) { localStorage.removeItem('screen_last_result'); return; }
+    // 回填 UI，加提示
+    document.getElementById('screen-status').innerHTML =
+      `<span class="text-slate-500">上次筛选结果（${new Date(saved.at).toLocaleString()}） · </span>` + saved.statusText +
+      ` <button onclick="clearLastScreen()" class="ml-2 text-xs text-slate-400 hover:text-red-500 underline">清除</button>`;
+    document.getElementById('screen-result').innerHTML = saved.resultHtml;
+    window.lastScreenContext = saved.context;
+  } catch {}
+})();
+
+window.clearLastScreen = function() {
+  localStorage.removeItem('screen_last_result');
+  document.getElementById('screen-status').innerHTML = '';
+  document.getElementById('screen-result').innerHTML = '';
+  window.lastScreenContext = null;
+};
+
 // -------- 选股 --------
 // 记住上一次筛选用的权重信息，供个股分析跳转时复用
 window.lastScreenContext = null;
@@ -368,20 +394,31 @@ async function runScreen() {
     }
 
     const r = await API('/screen', { method: 'POST', body: JSON.stringify(body) });
-    // 保存筛选时的权重上下文，供个股分析页复用
     window.lastScreenContext = {
       preset: r.preset,
       preset_name: r.preset_name,
       weights: r.weights,
       custom_weights: body.custom_weights || null,
     };
-    status.innerHTML = `已从 <b>${r.pool_size}</b> 只中筛选出综合分 ≥ ${body.min_score} 的 <b>${r.matched}</b> 只，展示前 <b>${r.results.length}</b> 只 · 风格 <b>${r.preset_name}</b>`;
+    const statusText = `已从 <b>${r.pool_size}</b> 只中筛选出综合分 ≥ ${body.min_score} 的 <b>${r.matched}</b> 只，展示前 <b>${r.results.length}</b> 只 · 风格 <b>${r.preset_name}</b>`;
+    status.innerHTML = statusText;
 
+    let resultHtml;
     if (r.results.length === 0) {
-      resultEl.innerHTML = '<div class="p-8 text-center text-slate-500">没有股票达到筛选条件，试试降低"综合分下限"或放宽过滤？</div>';
+      resultHtml = '<div class="p-8 text-center text-slate-500">没有股票达到筛选条件，试试降低"综合分下限"或放宽过滤？</div>';
     } else {
-      resultEl.innerHTML = renderScreenResults(r.results, r.weights);
+      resultHtml = renderScreenResults(r.results, r.weights);
     }
+    resultEl.innerHTML = resultHtml;
+
+    // 缓存到 localStorage：刷新后自动回填
+    try {
+      localStorage.setItem('screen_last_result', JSON.stringify({
+        at: new Date().toISOString(),
+        body, statusText, resultHtml,
+        context: window.lastScreenContext,
+      }));
+    } catch {}
   } catch (e) {
     status.innerHTML = `<span class="text-red-500">失败: ${e.message}</span>`;
   } finally {
@@ -855,6 +892,19 @@ async function refreshAgentProviderBadge() {
 }
 refreshAgentProviderBadge();
 
+async function autoResumeRunningAgent() {
+  // 有 running 任务就自动挂上、开始轮询；即使当前不在 portfolio tab 也做
+  try {
+    const r = await API('/agent?limit=5');
+    const running = r.tasks.find(t => t.status === 'running');
+    if (running && !window._agentCurrentTaskId) {
+      attachAgentTask(running.task_id);
+    }
+  } catch {}
+}
+// 页面加载时先检查一次，避免用户刷新后 running 任务被"孤儿化"
+autoResumeRunningAgent();
+
 window.startAgent = async function() {
   const goal = document.getElementById('agent-goal').value.trim();
   if (!goal) { alert('请输入你的目标'); return; }
@@ -894,15 +944,84 @@ window.refreshAgent = async function() {
   try {
     const t = await API(`/agent/${id}`);
     document.getElementById('agent-step-count').textContent = `${t.steps.length}/${t.max_iterations}`;
+    document.getElementById('agent-stop-btn').classList.toggle('hidden', t.status !== 'running');
+    const pill = document.getElementById('agent-status-pill');
+    const pillCls = {
+      running: 'bg-blue-100 text-blue-700',
+      done: 'bg-emerald-100 text-emerald-700',
+      failed: 'bg-red-100 text-red-700',
+      cancelled: 'bg-slate-100 text-slate-700',
+    }[t.status] || 'bg-slate-100 text-slate-700';
+    pill.className = `text-[11px] px-2 py-0.5 rounded ${pillCls}`;
+    pill.textContent = t.status;
     renderAgentSteps(t);
     if (t.status !== 'running') {
       if (window._agentPollTimer) clearInterval(window._agentPollTimer);
       window._agentPollTimer = null;
       renderAgentFinal(t);
+      loadAgentHistory();
     }
   } catch (e) {
     console.warn('agent poll error', e);
   }
+};
+
+window.stopAgent = async function() {
+  const id = window._agentCurrentTaskId;
+  if (!id) return;
+  if (!confirm('确定停止当前 AI 任务？已跑过的步骤会保留。')) return;
+  try {
+    await API(`/agent/${id}/cancel`, { method: 'POST' });
+    document.getElementById('agent-status').innerHTML = '<span class="text-slate-500">⏹ 已请求停止，等待下一轮退出...</span>';
+    refreshAgent();
+  } catch (e) {
+    alert('停止失败: ' + e.message);
+  }
+};
+
+async function loadAgentHistory() {
+  try {
+    const r = await API('/agent?limit=15');
+    const el = document.getElementById('agent-history-list');
+    if (!el) return;
+    if (!r.tasks.length) { el.innerHTML = '<div class="text-xs text-slate-400">暂无历史任务</div>'; return; }
+    el.innerHTML = r.tasks.map(t => {
+      const cls = {
+        running: 'bg-blue-50 text-blue-700 border-blue-200',
+        done: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+        failed: 'bg-red-50 text-red-600 border-red-200',
+        cancelled: 'bg-slate-50 text-slate-600 border-slate-200',
+      }[t.status] || 'bg-slate-50 text-slate-600 border-slate-200';
+      return `
+        <div class="border rounded p-2 flex items-center gap-2 ${cls}">
+          <span class="text-[11px] px-1.5 py-0.5 rounded bg-white/60 font-mono">${t.task_id}</span>
+          <span class="text-[11px] px-1.5 py-0.5 rounded bg-white/60">${t.status}</span>
+          <span class="text-xs flex-1 truncate">${t.goal}</span>
+          <span class="text-[11px] text-slate-400 whitespace-nowrap">${t.step_count} 步 · ${(t.started_at||'').split('T')[0]}</span>
+          <button onclick="attachAgentTask('${t.task_id}')" class="text-xs px-2 py-0.5 rounded bg-white/70 hover:bg-white">查看</button>
+        </div>
+      `;
+    }).join('');
+  } catch (e) {
+    console.warn('load agent history failed', e);
+  }
+}
+
+window.attachAgentTask = function(taskId) {
+  window._agentCurrentTaskId = taskId;
+  document.getElementById('agent-task-id').textContent = taskId;
+  document.getElementById('agent-panel').classList.remove('hidden');
+  document.getElementById('agent-log').innerHTML = '';
+  document.getElementById('agent-final').classList.add('hidden');
+  document.getElementById('agent-status').innerHTML = '<span class="text-slate-500">已加载任务，正在拉取详情...</span>';
+  refreshAgent();
+  // 如果正在跑，自动轮询
+  API(`/agent/${taskId}`).then(t => {
+    if (t.status === 'running') {
+      if (window._agentPollTimer) clearInterval(window._agentPollTimer);
+      window._agentPollTimer = setInterval(refreshAgent, 3000);
+    }
+  });
 };
 
 function renderAgentSteps(t) {
@@ -991,8 +1110,11 @@ function renderAgentFinal(t) {
   }
 }
 
-// -------- 回测 --------
+// -------- 回测（任务化 · 后台跑 + 轮询 + 历史 + 可停） --------
 let btChart = null;
+window._btPollTimer = null;
+window._btCurrentTaskId = null;
+
 async function runBacktest() {
   const start = document.getElementById('bt-start').value;
   const end = document.getElementById('bt-end').value;
@@ -1000,11 +1122,9 @@ async function runBacktest() {
   const limit = parseInt(document.getElementById('bt-limit').value) || 20;
   if (!start || !end) return alert('请选择起止日期');
   const btn = document.getElementById('bt-btn');
-  const status = document.getElementById('bt-status');
   btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span> 回测中...';
+  btn.innerHTML = '<span class="spinner"></span> 提交中...';
 
-  // 组装 body。综合分下限只在打分策略下有意义
   const body = { start, end, pool, limit, initial_cash: 100000 };
   if (window.btStrategyType !== 'technical') {
     body.min_score = parseFloat(document.getElementById('bt-min-score').value) || 0;
@@ -1019,95 +1139,200 @@ async function runBacktest() {
     body.strategy_type = 'technical';
     body.strategy_id = id;
     body.strategy_params = params;
-    status.innerHTML = `<span class="spinner"></span> 正在逐日模拟撮合... 技术策略 <b>${id}</b>`;
   } else {
     body.strategy_type = 'score';
     body.preset = document.getElementById('bt-preset').value;
-    status.innerHTML = `<span class="spinner"></span> 正在逐日模拟撮合... 打分策略 · 风格 ${body.preset}`;
   }
 
   try {
     const r = await API('/backtest/run', { method: 'POST', body: JSON.stringify(body) });
-    status.textContent = `完成 · 成交 ${r.trades_count} 笔`;
-    document.getElementById('bt-result').classList.remove('hidden');
-
-    // 元信息
-    if (r.strategy_type === 'technical') {
-      const paramStr = Object.entries(r.params || {}).map(([k, v]) => `${k}=${v}`).join(' ');
-      document.getElementById('bt-meta').innerHTML = `
-        策略类型：<b>技术指标</b> · 策略：<b>${r.strategy_id}</b>
-        <span class="text-slate-400">${paramStr}</span>
-      `;
-    } else {
-      const w = r.weights || {};
-      document.getElementById('bt-meta').innerHTML = `
-        策略：<b>swing_v1</b> · 风格：<b>${r.preset_name}</b>
-        <span class="text-slate-400">
-          (技术 ${(w.technical*100).toFixed(0)}% · 基本 ${(w.fundamental*100).toFixed(0)}%
-          · 情绪 ${(w.sentiment*100).toFixed(0)}% · 资金 ${(w.moneyflow*100).toFixed(0)}%)
-        </span>
-      `;
-    }
-
-    const m = r.metrics;
-    const cards = [
-      ['累计收益', (m.cumulative_return * 100).toFixed(2) + '%', m.cumulative_return >= 0],
-      ['年化收益', (m.annualized_return * 100).toFixed(2) + '%', m.annualized_return >= 0],
-      ['最大回撤', '-' + (m.max_drawdown * 100).toFixed(2) + '%', false],
-      ['夏普比率', m.sharpe.toFixed(2), m.sharpe >= 1],
-    ];
-    document.getElementById('bt-metrics').innerHTML = cards.map(([k, v, good]) => `
-      <div class="p-4 border border-slate-200 rounded-lg">
-        <div class="text-xs text-slate-500">${k}</div>
-        <div class="text-xl font-semibold mt-1 ${good ? 'text-red-600' : 'text-slate-700'}">${v}</div>
-      </div>`).join('');
-
-    if (btChart) btChart.destroy();
-    btChart = new Chart(document.getElementById('bt-chart'), {
-      type: 'line',
-      data: {
-        labels: r.snapshots.map(s => s.date),
-        datasets: [{
-          label: '净值 (¥)', data: r.snapshots.map(s => s.total),
-          borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.1)',
-          tension: 0.1, pointRadius: 0, fill: true,
-        }],
-      },
-      options: {
-        scales: { x: { ticks: { maxTicksLimit: 12 } } },
-        plugins: { legend: { display: false } },
-      },
-    });
-
-    // 最近成交
-    const trades = r.trades_sample || [];
-    document.getElementById('bt-trades').innerHTML = trades.length ? `
-      <div class="font-semibold text-sm text-slate-700 mb-2">最后 ${trades.length} 笔成交</div>
-      <div class="overflow-x-auto"><table class="min-w-full text-sm">
-        <thead class="bg-slate-50 text-xs text-slate-500"><tr>
-          <th class="px-3 py-2 text-left">日期</th>
-          <th class="px-3 py-2 text-left">方向</th>
-          <th class="px-3 py-2 text-left">代码</th>
-          <th class="px-3 py-2 text-left">数量/价格</th>
-          <th class="px-3 py-2 text-left">原因</th>
-        </tr></thead><tbody>
-          ${trades.map(t => `<tr class="border-b border-slate-100">
-            <td class="px-3 py-2 text-xs">${t.date}</td>
-            <td class="px-3 py-2 text-xs font-semibold ${t.side === 'buy' ? 'text-red-600' : 'text-emerald-600'}">${t.side === 'buy' ? '买' : '卖'}</td>
-            <td class="px-3 py-2 font-mono text-xs">${t.symbol}</td>
-            <td class="px-3 py-2 text-xs">${t.shares} 股 @ ¥${t.price.toFixed(2)}</td>
-            <td class="px-3 py-2 text-xs text-slate-500">${t.reason}</td>
-          </tr>`).join('')}
-        </tbody></table></div>
-    ` : '';
+    attachBacktestTask(r.task_id, r.label);
+    loadBacktestHistory();
   } catch (e) {
-    status.innerHTML = `<span class="text-red-500">失败: ${e.message}</span>`;
-  } finally {
+    document.getElementById('bt-status').innerHTML = `<span class="text-red-500">失败: ${e.message}</span>`;
     btn.disabled = false;
     btn.textContent = '开始回测';
   }
 }
 window.runBacktest = runBacktest;
+
+window.attachBacktestTask = function(taskId, label) {
+  window._btCurrentTaskId = taskId;
+  document.getElementById('bt-status').innerHTML = `<span class="spinner"></span> 任务 <span class="font-mono text-xs">${taskId}</span> · ${label || ''}`;
+  document.getElementById('bt-progress').classList.remove('hidden');
+  document.getElementById('bt-stop-btn').classList.remove('hidden');
+  document.getElementById('bt-btn').textContent = '开始回测';
+  document.getElementById('bt-btn').disabled = false;
+  document.getElementById('bt-result').classList.add('hidden');
+  if (window._btPollTimer) clearInterval(window._btPollTimer);
+  window._btPollTimer = setInterval(refreshBacktest, 2000);
+  refreshBacktest();
+};
+
+async function refreshBacktest() {
+  const id = window._btCurrentTaskId;
+  if (!id) return;
+  try {
+    const t = await API(`/backtest/tasks/${id}`);
+    const status = document.getElementById('bt-status');
+    const pb = document.getElementById('bt-progress-bar');
+    const pt = document.getElementById('bt-progress-text');
+    const stopBtn = document.getElementById('bt-stop-btn');
+    if (t.status === 'running') {
+      const p = t.progress || {};
+      const pct = p.total ? (p.done / p.total * 100) : 0;
+      pb.style.width = pct + '%';
+      pt.textContent = `${p.done || 0} / ${p.total || '?'} 交易日 · 当前 ${p.day || '—'}`;
+      status.innerHTML = `<span class="spinner"></span> ${t.label} · 进行中`;
+      stopBtn.classList.remove('hidden');
+    } else {
+      stopBtn.classList.add('hidden');
+      if (window._btPollTimer) clearInterval(window._btPollTimer);
+      window._btPollTimer = null;
+      if (t.status === 'done' && t.result) {
+        document.getElementById('bt-progress').classList.add('hidden');
+        status.innerHTML = `<span class="text-emerald-600">✓ 完成</span> · 成交 ${t.result.trades_count} 笔 · <span class="text-xs text-slate-400 font-mono">${id}</span>`;
+        renderBacktestResult(t.result);
+      } else if (t.status === 'failed') {
+        status.innerHTML = `<span class="text-red-500">失败: ${(t.error || '').split('\n')[0]}</span>`;
+      } else if (t.status === 'cancelled') {
+        status.innerHTML = `<span class="text-slate-500">⏹ 已取消 · <span class="font-mono text-xs">${id}</span></span>`;
+      }
+      loadBacktestHistory();
+    }
+  } catch (e) {
+    console.warn('bt poll error', e);
+  }
+}
+window.refreshBacktest = refreshBacktest;
+
+window.stopBacktest = async function() {
+  const id = window._btCurrentTaskId;
+  if (!id) return;
+  if (!confirm('确定停止当前回测？已计算的进度不会保留（结果 = 空）。')) return;
+  try {
+    await API(`/backtest/tasks/${id}/cancel`, { method: 'POST' });
+    document.getElementById('bt-status').innerHTML = '<span class="text-slate-500">⏹ 已请求停止，等待引擎在下一个交易日退出...</span>';
+    refreshBacktest();
+  } catch (e) {
+    alert('停止失败: ' + e.message);
+  }
+};
+
+function renderBacktestResult(r) {
+  document.getElementById('bt-result').classList.remove('hidden');
+  if (r.strategy_type === 'technical') {
+    const paramStr = Object.entries(r.params || {}).map(([k, v]) => `${k}=${v}`).join(' ');
+    document.getElementById('bt-meta').innerHTML = `
+      策略类型：<b>技术指标</b> · 策略：<b>${r.strategy_id}</b>
+      <span class="text-slate-400">${paramStr}</span>
+    `;
+  } else {
+    const w = r.weights || {};
+    document.getElementById('bt-meta').innerHTML = `
+      策略：<b>swing_v1</b> · 风格：<b>${r.preset_name}</b>
+      <span class="text-slate-400">
+        (技术 ${(w.technical*100).toFixed(0)}% · 基本 ${(w.fundamental*100).toFixed(0)}%
+        · 情绪 ${(w.sentiment*100).toFixed(0)}% · 资金 ${(w.moneyflow*100).toFixed(0)}%)
+      </span>
+    `;
+  }
+  const m = r.metrics;
+  const cards = [
+    ['累计收益', (m.cumulative_return * 100).toFixed(2) + '%', m.cumulative_return >= 0],
+    ['年化收益', (m.annualized_return * 100).toFixed(2) + '%', m.annualized_return >= 0],
+    ['最大回撤', '-' + (m.max_drawdown * 100).toFixed(2) + '%', false],
+    ['夏普比率', m.sharpe.toFixed(2), m.sharpe >= 1],
+  ];
+  document.getElementById('bt-metrics').innerHTML = cards.map(([k, v, good]) => `
+    <div class="p-4 border border-slate-200 rounded-lg">
+      <div class="text-xs text-slate-500">${k}</div>
+      <div class="text-xl font-semibold mt-1 ${good ? 'text-red-600' : 'text-slate-700'}">${v}</div>
+    </div>`).join('');
+  if (btChart) btChart.destroy();
+  btChart = new Chart(document.getElementById('bt-chart'), {
+    type: 'line',
+    data: {
+      labels: r.snapshots.map(s => s.date),
+      datasets: [{
+        label: '净值 (¥)', data: r.snapshots.map(s => s.total),
+        borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.1)',
+        tension: 0.1, pointRadius: 0, fill: true,
+      }],
+    },
+    options: {
+      scales: { x: { ticks: { maxTicksLimit: 12 } } },
+      plugins: { legend: { display: false } },
+    },
+  });
+  const trades = r.trades_sample || [];
+  document.getElementById('bt-trades').innerHTML = trades.length ? `
+    <div class="font-semibold text-sm text-slate-700 mb-2">最后 ${trades.length} 笔成交</div>
+    <div class="overflow-x-auto"><table class="min-w-full text-sm">
+      <thead class="bg-slate-50 text-xs text-slate-500"><tr>
+        <th class="px-3 py-2 text-left">日期</th>
+        <th class="px-3 py-2 text-left">方向</th>
+        <th class="px-3 py-2 text-left">代码</th>
+        <th class="px-3 py-2 text-left">数量/价格</th>
+        <th class="px-3 py-2 text-left">原因</th>
+      </tr></thead><tbody>
+        ${trades.map(t => `<tr class="border-b border-slate-100">
+          <td class="px-3 py-2 text-xs">${t.date}</td>
+          <td class="px-3 py-2 text-xs font-semibold ${t.side === 'buy' ? 'text-red-600' : 'text-emerald-600'}">${t.side === 'buy' ? '买' : '卖'}</td>
+          <td class="px-3 py-2 font-mono text-xs">${t.symbol}</td>
+          <td class="px-3 py-2 text-xs">${t.shares} 股 @ ¥${t.price.toFixed(2)}</td>
+          <td class="px-3 py-2 text-xs text-slate-500">${t.reason}</td>
+        </tr>`).join('')}
+      </tbody></table></div>
+  ` : '';
+}
+
+async function loadBacktestHistory() {
+  const el = document.getElementById('bt-history-list');
+  if (!el) return;
+  try {
+    const r = await API('/backtest/tasks?limit=20');
+    if (!r.tasks.length) { el.innerHTML = '<div class="text-xs text-slate-400">暂无历史任务</div>'; return; }
+    el.innerHTML = r.tasks.map(t => {
+      const cls = {
+        running: 'bg-blue-50 text-blue-700 border-blue-200',
+        done: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+        failed: 'bg-red-50 text-red-600 border-red-200',
+        cancelled: 'bg-slate-50 text-slate-600 border-slate-200',
+      }[t.status] || 'bg-slate-50 text-slate-600 border-slate-200';
+      const m = t.metrics_summary || {};
+      const metrics = t.status === 'done' && m.cumulative_return != null
+        ? `累计 ${(m.cumulative_return*100).toFixed(1)}% · 年化 ${(m.annualized_return*100).toFixed(1)}% · 夏普 ${m.sharpe.toFixed(2)}`
+        : (t.status === 'running' && t.progress?.total
+            ? `进度 ${t.progress.done}/${t.progress.total}`
+            : '—');
+      const safeLabel = (t.label||'').replace(/'/g, '\\\'');
+      return `
+        <div class="border rounded p-2 flex items-center gap-2 ${cls}">
+          <span class="text-[11px] px-1.5 py-0.5 rounded bg-white/60 font-mono">${t.task_id}</span>
+          <span class="text-[11px] px-1.5 py-0.5 rounded bg-white/60">${t.status}</span>
+          <span class="text-xs flex-1 truncate">${t.label || '—'}</span>
+          <span class="text-[11px] text-slate-500 whitespace-nowrap">${metrics}</span>
+          <button onclick="attachBacktestTask('${t.task_id}','${safeLabel}')"
+            class="text-xs px-2 py-0.5 rounded bg-white/70 hover:bg-white">查看</button>
+        </div>
+      `;
+    }).join('');
+  } catch (e) {
+    console.warn('load bt history failed', e);
+  }
+}
+
+async function autoResumeRunningBacktest() {
+  try {
+    const r = await API('/backtest/tasks?limit=5');
+    const running = r.tasks.find(t => t.status === 'running');
+    if (running && !window._btCurrentTaskId) {
+      attachBacktestTask(running.task_id, running.label);
+    }
+  } catch {}
+}
+autoResumeRunningBacktest();
 
 // -------- 设置 --------
 async function loadSettings() {

@@ -325,9 +325,21 @@ def _ask_llm(task: AgentTask) -> dict:
 # ---- 主循环 -------------------------------------------------------
 
 
+def _reload_from_disk(task: AgentTask) -> AgentTask:
+    """从磁盘再读一次，看看 status 有没有被别人改成 cancelled。"""
+    fresh = AgentTask.load(task.task_id)
+    if fresh and fresh.status == "cancelled":
+        task.status = "cancelled"
+    return task
+
+
 def _run_loop(task: AgentTask):
     try:
         while task.status == "running" and len(task.steps) < task.max_iterations:
+            # 每轮开始前检查是否被外部要求取消
+            _reload_from_disk(task)
+            if task.status != "running":
+                break
             t0 = time.time()
             try:
                 decision = _ask_llm(task)
@@ -386,6 +398,18 @@ def _run_loop(task: AgentTask):
         task.status = "failed"
         task.finished_at = datetime.now().isoformat(timespec="seconds")
         task.save()
+
+
+def cancel_task(task_id: str) -> Optional[AgentTask]:
+    """把任务标记为 cancelled；后台线程下一轮会自行退出。已完成的任务原样返回。"""
+    t = AgentTask.load(task_id)
+    if t is None:
+        return None
+    if t.status == "running":
+        t.status = "cancelled"
+        t.finished_at = datetime.now().isoformat(timespec="seconds")
+        t.save()
+    return t
 
 
 def start_agent(goal: str, max_iterations: int = 10) -> AgentTask:

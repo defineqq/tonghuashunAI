@@ -706,10 +706,12 @@ def paper_run(req: PaperRunRequest):
 # ================ 回测 =================
 
 
-@router.post("/backtest/run", summary="跑一段历史回测")
-def backtest_run(req: BacktestRequest):
+def _prepare_backtest(req: BacktestRequest):
+    """
+    共用逻辑：解析 pool → symbols、构造 strategy_fn/kwargs、display_meta。
+    返回 (symbols, strategy_fn, strategy_kwargs, display_name, display_meta)。
+    """
     from data_layer import universe as uni
-    from backtest import engine, report
 
     fn_map = {
         "000300": uni.hs300_constituents,
@@ -730,7 +732,6 @@ def backtest_run(req: BacktestRequest):
     if req.limit:
         symbols = symbols[: req.limit]
 
-    # 根据 strategy_type 选择策略函数
     if req.strategy_type == "technical":
         if not req.strategy_id:
             raise HTTPException(400, "strategy_type=technical 时必须指定 strategy_id")
@@ -747,7 +748,6 @@ def backtest_run(req: BacktestRequest):
         display_meta = {"strategy_id": req.strategy_id, "params": req.strategy_params or {}}
     else:
         from my_strategies import swing_v1
-        # 权重来源：custom > preset
         if req.custom_weights:
             weights = req.custom_weights
         else:
@@ -764,24 +764,18 @@ def backtest_run(req: BacktestRequest):
             "preset_name": PRESET_LABELS.get(req.preset, {}).get("name", req.preset),
             "weights": weights,
         }
+    return symbols, strategy_fn, strategy_kwargs, display_name, display_meta
 
-    try:
-        result = engine.run(
-            strategy_fn=strategy_fn,
-            universe=symbols,
-            start=req.start,
-            end=req.end,
-            initial_cash=req.initial_cash,
-            strategy_kwargs=strategy_kwargs,
-        )
-    except Exception as e:
-        raise HTTPException(503, f"回测执行失败：{e}")
 
+def _serialize_backtest_result(result: dict, display_name: str, display_meta: dict,
+                                strategy_type: str, req: "BacktestRequest") -> dict:
+    """把 engine.run 的返回值转成前端可用的 JSON 结构。"""
+    from backtest import report
     md_path = report.render(result, strategy_name=display_name)
     snapshots = result["snapshots"].copy()
     snapshots["date"] = snapshots["date"].astype(str)
     return {
-        "strategy_type": req.strategy_type,
+        "strategy_type": strategy_type,
         "strategy": display_name,
         **display_meta,
         "metrics": result["metrics"],
@@ -794,6 +788,70 @@ def backtest_run(req: BacktestRequest):
         ],
         "report_path": str(md_path),
     }
+
+
+@router.post("/backtest/run", summary="启动一次回测任务（后台运行，前端轮询）")
+def backtest_run(req: BacktestRequest):
+    from backtest import engine
+    from backtest.tasks import start_task
+
+    symbols, strategy_fn, strategy_kwargs, display_name, display_meta = _prepare_backtest(req)
+    label = f"{display_name} · {req.pool} · {req.start}~{req.end}"
+
+    def run_fn(progress_cb):
+        result = engine.run(
+            strategy_fn=strategy_fn,
+            universe=symbols,
+            start=req.start,
+            end=req.end,
+            initial_cash=req.initial_cash,
+            strategy_kwargs=strategy_kwargs,
+            progress_cb=progress_cb,
+        )
+        return _serialize_backtest_result(result, display_name, display_meta,
+                                          req.strategy_type, req)
+
+    task = start_task(label=label, request=req.model_dump(), run_fn=run_fn)
+    return {
+        "task_id": task.task_id,
+        "status": task.status,
+        "label": task.label,
+        "started_at": task.started_at,
+    }
+
+
+@router.get("/backtest/tasks", summary="回测历史任务列表（含正在跑的）")
+def backtest_task_list(limit: int = 30):
+    from backtest.tasks import list_tasks
+    return {"tasks": list_tasks(limit=limit)}
+
+
+@router.get("/backtest/tasks/{task_id}", summary="查询单个回测任务（含结果或进度）")
+def backtest_task_get(task_id: str):
+    from backtest.tasks import BacktestTask
+    t = BacktestTask.load(task_id)
+    if t is None:
+        raise HTTPException(404, "任务不存在")
+    return {
+        "task_id": t.task_id,
+        "label": t.label,
+        "status": t.status,
+        "started_at": t.started_at,
+        "finished_at": t.finished_at,
+        "progress": t.progress,
+        "request": t.request,
+        "result": t.result,
+        "error": t.error,
+    }
+
+
+@router.post("/backtest/tasks/{task_id}/cancel", summary="取消正在跑的回测")
+def backtest_task_cancel(task_id: str):
+    from backtest.tasks import cancel_task
+    t = cancel_task(task_id)
+    if t is None:
+        raise HTTPException(404, "任务不存在")
+    return {"task_id": t.task_id, "status": t.status}
 
 
 # ================ Qbot 集成 =================
@@ -1240,3 +1298,12 @@ def agent_status(task_id: str):
 def agent_list(limit: int = 20):
     from ai_analysis.agent_loop import list_tasks
     return {"tasks": list_tasks(limit=limit)}
+
+
+@router.post("/agent/{task_id}/cancel", summary="请求取消正在跑的 AI 任务")
+def agent_cancel(task_id: str):
+    from ai_analysis.agent_loop import cancel_task
+    t = cancel_task(task_id)
+    if t is None:
+        raise HTTPException(404, "任务不存在")
+    return {"task_id": t.task_id, "status": t.status}

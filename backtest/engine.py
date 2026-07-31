@@ -84,6 +84,7 @@ def run(
     risk_cfg: RiskConfig | None = None,
     max_positions: int = 5,
     progress_every: int = 10,
+    progress_cb: Callable[[int, int, str], None] | None = None,
 ) -> dict:
     """
     跑一段历史回测。
@@ -133,6 +134,10 @@ def run(
         if i % progress_every == 0 or i == len(trading_days):
             snap = port.daily_snapshots[-1]
             print(f"  [{i}/{len(trading_days)}] {date}  总值 ¥{snap.total:,.0f}  PnL {snap.pnl_pct*100:+.2f}%  持仓 {snap.n_positions}")
+
+        if progress_cb is not None:
+            # 每天都通报（任务化下载/取消检测需要）
+            progress_cb(i, len(trading_days), date)
 
     # 汇总
     from backtest.metrics import summarize
