@@ -21,8 +21,14 @@ import yaml
 from analysis import technical, fundamental_score, moneyflow_score
 
 
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
 def _load_weights(config_path: str | Path = "configs/strategy.yaml") -> dict:
-    with open(config_path, encoding="utf-8") as f:
+    p = Path(config_path)
+    if not p.is_absolute() and not p.exists():
+        p = _PROJECT_ROOT / p
+    with open(p, encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
     return cfg["swing_v1"]["weights"]
 

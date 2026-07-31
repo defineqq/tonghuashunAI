@@ -24,8 +24,14 @@ from paper_trade.broker import BuySignal
 from paper_trade.risk import SellSignal
 
 
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
 def _load_cfg(path: str | Path = "configs/strategy.yaml") -> dict:
-    with open(path, encoding="utf-8") as f:
+    p = Path(path)
+    if not p.is_absolute() and not p.exists():
+        p = _PROJECT_ROOT / p
+    with open(p, encoding="utf-8") as f:
         return yaml.safe_load(f)["swing_v1"]
 
 

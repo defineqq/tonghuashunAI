@@ -835,6 +835,162 @@ function renderAccount(p) {
   `;
 }
 
+// -------- AI 行动（Agent） --------
+window._agentPollTimer = null;
+window._agentCurrentTaskId = null;
+
+async function refreshAgentProviderBadge() {
+  const badge = document.getElementById('agent-provider-badge');
+  if (!badge) return;
+  try {
+    const s = await API('/status');
+    if (s.llm.configured) {
+      badge.textContent = 'AI: ' + s.llm.provider;
+      badge.className = 'ml-auto text-[11px] px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200';
+    } else {
+      badge.textContent = 'AI 未配置 · 走 stub 示例';
+      badge.className = 'ml-auto text-[11px] px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200';
+    }
+  } catch {}
+}
+refreshAgentProviderBadge();
+
+window.startAgent = async function() {
+  const goal = document.getElementById('agent-goal').value.trim();
+  if (!goal) { alert('请输入你的目标'); return; }
+  const maxIter = parseInt(document.getElementById('agent-max-iter').value) || 8;
+  const btn = document.getElementById('agent-start-btn');
+  const btnText = document.getElementById('agent-start-btn-text');
+  const status = document.getElementById('agent-status');
+  btn.disabled = true;
+  btnText.innerHTML = '<span class="spinner"></span> 启动中...';
+  status.innerHTML = '';
+  document.getElementById('agent-log').innerHTML = '';
+  document.getElementById('agent-final').classList.add('hidden');
+  try {
+    const r = await API('/agent/run', {
+      method: 'POST',
+      body: JSON.stringify({ goal, max_iterations: maxIter }),
+    });
+    window._agentCurrentTaskId = r.task_id;
+    document.getElementById('agent-task-id').textContent = r.task_id;
+    document.getElementById('agent-panel').classList.remove('hidden');
+    status.innerHTML = `<span class="text-emerald-600">✓ 任务已启动，AI (${r.provider}) 正在思考...</span>`;
+    // 3 秒后开始轮询
+    if (window._agentPollTimer) clearInterval(window._agentPollTimer);
+    window._agentPollTimer = setInterval(refreshAgent, 3000);
+    refreshAgent();
+  } catch (e) {
+    status.innerHTML = `<span class="text-red-500">失败: ${e.message}</span>`;
+  } finally {
+    btn.disabled = false;
+    btnText.textContent = '🚀 启动 AI 研究';
+  }
+};
+
+window.refreshAgent = async function() {
+  const id = window._agentCurrentTaskId;
+  if (!id) return;
+  try {
+    const t = await API(`/agent/${id}`);
+    document.getElementById('agent-step-count').textContent = `${t.steps.length}/${t.max_iterations}`;
+    renderAgentSteps(t);
+    if (t.status !== 'running') {
+      if (window._agentPollTimer) clearInterval(window._agentPollTimer);
+      window._agentPollTimer = null;
+      renderAgentFinal(t);
+    }
+  } catch (e) {
+    console.warn('agent poll error', e);
+  }
+};
+
+function renderAgentSteps(t) {
+  const el = document.getElementById('agent-log');
+  const actionColors = {
+    list_strategies: 'bg-slate-100 text-slate-700',
+    backtest_score: 'bg-blue-100 text-blue-700',
+    backtest_technical: 'bg-emerald-100 text-emerald-700',
+    create_strategy_from_text: 'bg-purple-100 text-purple-700',
+    finish: 'bg-amber-100 text-amber-800',
+  };
+  el.innerHTML = t.steps.map(s => {
+    const badge = actionColors[s.action] || 'bg-slate-100 text-slate-700';
+    let body = '';
+    if (s.error) {
+      body = `<div class="text-xs text-red-600 mt-1">❌ ${s.error}</div>`;
+    } else if (s.action === 'backtest_score' || s.action === 'backtest_technical') {
+      const m = s.result?.metrics || {};
+      const cfg = s.result?.config || {};
+      body = `
+        <div class="text-xs text-slate-600 mt-1">
+          <b>配置：</b>${JSON.stringify(cfg, null, 0)}
+        </div>
+        <div class="mt-1 flex flex-wrap gap-3 text-xs">
+          <span>累计: <b class="${(m.cumulative_return||0)>=0?'text-red-600':'text-emerald-600'}">${((m.cumulative_return||0)*100).toFixed(1)}%</b></span>
+          <span>年化: <b>${((m.annualized_return||0)*100).toFixed(1)}%</b></span>
+          <span>回撤: <b class="text-emerald-600">-${((m.max_drawdown||0)*100).toFixed(1)}%</b></span>
+          <span>夏普: <b>${(m.sharpe||0).toFixed(2)}</b></span>
+          <span>成交: <b>${s.result?.trades_count||0}</b></span>
+        </div>
+      `;
+    } else if (s.action === 'list_strategies' && s.result) {
+      const n = s.result.strategies?.length || 0;
+      body = `<div class="text-xs text-slate-600 mt-1">拿到 ${n} 个策略</div>`;
+    } else if (s.action === 'create_strategy_from_text' && s.result) {
+      body = `<div class="text-xs text-slate-600 mt-1">✓ 新建策略 <code>${s.result.strategy_id}</code>：${s.result.notes || ''}</div>`;
+    }
+    return `
+      <div class="border border-slate-200 rounded p-3 bg-white">
+        <div class="flex items-center gap-2">
+          <span class="text-xs text-slate-400 font-mono">#${s.idx}</span>
+          <span class="text-xs px-2 py-0.5 rounded ${badge} font-medium">${s.action}</span>
+          <span class="text-xs text-slate-400 ml-auto">${s.duration_ms}ms · ${s.at.split('T')[1] || ''}</span>
+        </div>
+        ${s.reason ? `<div class="text-xs text-slate-600 mt-1">💭 ${s.reason}</div>` : ''}
+        ${body}
+      </div>
+    `;
+  }).join('') || '<div class="text-sm text-slate-400 p-4 text-center">AI 正在思考中...</div>';
+  // 自动滚动到底部
+  el.scrollTop = el.scrollHeight;
+}
+
+function renderAgentFinal(t) {
+  const el = document.getElementById('agent-final');
+  el.classList.remove('hidden');
+  const status = document.getElementById('agent-status');
+  if (t.status === 'done') {
+    status.innerHTML = `<span class="text-emerald-600">✅ AI 研究完成</span>`;
+    const best = t.final?.best;
+    const alts = t.final?.alternatives || [];
+    el.innerHTML = `
+      <div class="text-sm font-semibold text-emerald-900 mb-2">🎯 AI 结论</div>
+      <div class="text-sm text-emerald-800 leading-relaxed mb-3">${t.final?.summary || '（无总结）'}</div>
+      ${best ? `
+        <div class="p-3 bg-white rounded border border-emerald-200 mb-2">
+          <div class="text-xs text-slate-500 mb-1">推荐配置</div>
+          <pre class="text-xs overflow-auto">${JSON.stringify(best, null, 2)}</pre>
+        </div>
+      ` : ''}
+      ${alts.length ? `
+        <div class="text-xs text-slate-500 mt-2">备选方案 ${alts.length} 个：</div>
+        <details class="text-xs mt-1">
+          <summary class="cursor-pointer text-emerald-700">展开</summary>
+          <pre class="mt-1 overflow-auto">${JSON.stringify(alts, null, 2)}</pre>
+        </details>
+      ` : ''}
+    `;
+  } else if (t.status === 'failed') {
+    status.innerHTML = `<span class="text-red-500">❌ 任务失败</span>`;
+    el.className = 'mt-4 p-4 bg-red-50 border border-red-200 rounded';
+    el.innerHTML = `<pre class="text-xs text-red-700 whitespace-pre-wrap">${t.error || '未知错误'}</pre>`;
+  } else if (t.status === 'cancelled') {
+    status.innerHTML = `<span class="text-slate-500">⏹ 已取消</span>`;
+    el.innerHTML = '<div class="text-sm text-slate-500">任务已被取消</div>';
+  }
+}
+
 // -------- 回测 --------
 let btChart = null;
 async function runBacktest() {

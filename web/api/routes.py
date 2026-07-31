@@ -1184,3 +1184,59 @@ def save_settings(req: SaveSettingsRequest):
         )
 
     return {"ok": True}
+
+
+# ================ AI Agent（自主回测搜索） =================
+
+
+class AgentRunRequest(BaseModel):
+    goal: str = Field(..., description="用户给 AI 的目标，例如「半年内找到累计收益 >100% 的策略」")
+    max_iterations: int = Field(10, ge=1, le=50, description="最多允许 AI 决策多少轮")
+
+
+@router.post("/agent/run", summary="启动 AI 自主回测研究任务（后台运行）")
+def agent_run(req: AgentRunRequest):
+    from ai_analysis.agent_loop import start_agent
+    if not req.goal.strip():
+        raise HTTPException(400, "goal 不能为空")
+    task = start_agent(req.goal, max_iterations=req.max_iterations)
+    return {
+        "task_id": task.task_id,
+        "status": task.status,
+        "provider": task.provider,
+        "started_at": task.started_at,
+    }
+
+
+@router.get("/agent/{task_id}", summary="查询 AI 任务的完整日志和结果")
+def agent_status(task_id: str):
+    from ai_analysis.agent_loop import AgentTask
+    t = AgentTask.load(task_id)
+    if t is None:
+        raise HTTPException(404, "任务不存在")
+    return {
+        "task_id": t.task_id,
+        "goal": t.goal,
+        "status": t.status,
+        "provider": t.provider,
+        "max_iterations": t.max_iterations,
+        "started_at": t.started_at,
+        "finished_at": t.finished_at,
+        "steps": [
+            {
+                "idx": s.idx, "at": s.at, "action": s.action,
+                "args": s.args, "reason": s.reason,
+                "result": s.result, "error": s.error,
+                "duration_ms": s.duration_ms,
+            }
+            for s in t.steps
+        ],
+        "final": t.final,
+        "error": t.error,
+    }
+
+
+@router.get("/agent", summary="列出最近的 AI 任务")
+def agent_list(limit: int = 20):
+    from ai_analysis.agent_loop import list_tasks
+    return {"tasks": list_tasks(limit=limit)}

@@ -300,6 +300,48 @@
       </div>
       <div id="acct-view" class="mt-6 text-sm text-slate-500">先选一个账户或新建一个...</div>
     </div>
+
+    <!-- AI 行动对话框 -->
+    <div class="card p-6 border-2 border-purple-100">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="text-2xl">🤖</span>
+        <h2 class="text-xl font-semibold">AI 行动 · 自主研究员</h2>
+        <span id="agent-provider-badge" class="ml-auto text-[11px] px-2 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200">检测中…</span>
+      </div>
+      <p class="text-sm text-slate-500 mb-4">
+        给 AI 一个目标，它自己去列策略、跑回测、调参数、创建新策略，直到达成目标或用完预算。
+        每一轮的决策 + 结果都会实时显示在下面。
+      </p>
+      <div class="p-3 bg-purple-50 border border-purple-100 rounded text-xs text-purple-800 mb-3 leading-relaxed">
+        例子：
+        <div class="italic mt-1">"回测最近半年，帮我找一个累计收益超过 30% 的策略"</div>
+        <div class="italic">"试试各种技术策略在中证 500 上的表现，挑最好的"</div>
+        <div class="italic">"帮我创建一个 MACD+RSI 组合，回测 2024 上半年"</div>
+      </div>
+      <textarea id="agent-goal" rows="3" class="field text-sm mb-3"
+        placeholder="用中文告诉 AI 你要什么。它会自主决策接下来做什么，你只用等结果。"></textarea>
+      <div class="flex flex-wrap items-center gap-3 mb-3">
+        <label class="text-sm text-slate-600">
+          最多轮数：
+          <input id="agent-max-iter" type="number" value="8" min="2" max="30" class="field inline-block w-20 py-1 text-sm">
+          <span class="text-xs text-slate-400">（每轮含 1 次 LLM + 可能 1 次回测，约 30s–2min）</span>
+        </label>
+        <button onclick="startAgent()" id="agent-start-btn" class="btn btn-primary ml-auto">
+          <span id="agent-start-btn-text">🚀 启动 AI 研究</span>
+        </button>
+      </div>
+      <div id="agent-status" class="text-sm text-slate-500 mb-3"></div>
+      <div id="agent-panel" class="hidden">
+        <div class="text-xs text-slate-500 mb-2 flex items-center gap-2">
+          <span>任务 ID: <span id="agent-task-id" class="font-mono"></span></span>
+          <span>·</span>
+          <span>已用轮数: <span id="agent-step-count">0</span></span>
+          <button onclick="refreshAgent()" class="ml-auto text-xs px-2 py-1 bg-slate-100 rounded hover:bg-slate-200">🔄 刷新</button>
+        </div>
+        <div id="agent-log" class="space-y-2 max-h-96 overflow-auto"></div>
+        <div id="agent-final" class="hidden mt-4 p-4 bg-emerald-50 border border-emerald-200 rounded"></div>
+      </div>
+    </div>
   </section>
 
   <!-- ============ 策略实验室 ============ -->
