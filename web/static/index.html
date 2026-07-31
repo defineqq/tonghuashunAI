@@ -134,13 +134,14 @@
             2. 股票池
             <span class="info relative">
               <span class="text-slate-400">ⓘ</span>
-              <span class="tip">沪深 300 是大盘蓝筹；中证 500 是中盘；1000 是小盘成长股。首次用建议沪深 300。</span>
+              <span class="tip">沪深 300 大盘蓝筹；中证 500 中盘；1000 小盘。<b>全 A</b> = 沪深北全部可交易股，配合下面的过滤面板使用。首次建议沪深 300。</span>
             </span>
           </div>
-          <select id="screen-pool" class="field">
+          <select id="screen-pool" class="field" onchange="onScreenPoolChange()">
             <option value="000300">沪深 300（大盘蓝筹）</option>
             <option value="000905">中证 500（中盘）</option>
             <option value="000852">中证 1000（小盘）</option>
+            <option value="all">🌐 全 A 股（自选过滤）</option>
           </select>
         </div>
         <div>
@@ -171,6 +172,49 @@
         <div>
           <div class="label">5. 最多返回几只</div>
           <input id="screen-top-n" type="number" value="10" min="1" max="50" class="field">
+        </div>
+      </div>
+
+      <!-- 全 A 过滤面板：只在 pool=all 时显示 -->
+      <div id="all-a-filters" class="hidden mb-6 p-4 bg-slate-50 border border-slate-200 rounded-lg">
+        <div class="text-sm font-semibold text-slate-700 mb-3">🌐 全 A 池粗过滤（在打分前先缩小候选范围）</div>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div>
+            <div class="label text-xs">交易所 / 板块</div>
+            <select id="all-a-exchange" class="field text-sm">
+              <option value="all">全部</option>
+              <option value="main">主板（沪+深）</option>
+              <option value="sh">上交所</option>
+              <option value="sz">深交所</option>
+              <option value="kcb">科创板 688</option>
+              <option value="cyb">创业板 300</option>
+              <option value="bj">北交所</option>
+            </select>
+          </div>
+          <div>
+            <div class="label text-xs">股价 ¥（可留空）</div>
+            <div class="flex gap-1">
+              <input id="all-a-min-price" type="number" placeholder="下限" class="field text-sm" step="0.1">
+              <input id="all-a-max-price" type="number" placeholder="上限" class="field text-sm" step="0.1">
+            </div>
+          </div>
+          <div>
+            <div class="label text-xs">总市值 亿元（可留空）</div>
+            <div class="flex gap-1">
+              <input id="all-a-min-mcap" type="number" placeholder="下限" class="field text-sm">
+              <input id="all-a-max-mcap" type="number" placeholder="上限" class="field text-sm">
+            </div>
+          </div>
+          <div>
+            <div class="label text-xs">其他</div>
+            <label class="flex items-center gap-2 text-sm text-slate-600 mt-1.5">
+              <input id="all-a-exclude-st" type="checkbox" class="w-4 h-4" checked>
+              排除 ST/退市
+            </label>
+          </div>
+        </div>
+        <div class="text-xs text-slate-500 mt-2">
+          说明：先按上述条件缩小到几百只，再按"池子取前几只"取样打分（按总市值降序）。全 A 池打分较慢，建议配合 <b>池大小 ≤ 100</b>。
         </div>
       </div>
 

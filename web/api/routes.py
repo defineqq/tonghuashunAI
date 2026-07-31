@@ -14,6 +14,7 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
+import pandas as pd
 
 
 router = APIRouter()
@@ -26,6 +27,8 @@ class ScoreRequest(BaseModel):
     symbol: str = Field(..., description="6 位股票代码")
     as_of: Optional[str] = Field(None, description="截止日期 YYYY-MM-DD")
     use_llm: bool = True
+    preset: Optional[str] = Field(None, description="策略预设 key；若同时传 custom_weights 则以后者为准")
+    custom_weights: Optional[dict] = Field(None, description="自定义四维权重，键：technical/fundamental/sentiment/moneyflow")
 
 
 class RankRequest(BaseModel):
@@ -37,14 +40,22 @@ class RankRequest(BaseModel):
 
 class ScreenRequest(BaseModel):
     """一站式股票筛选器：选池 → 筛选 → 打分 → 返回结果。"""
-    pool: str = Field("000300", description="000300=沪深300, 000905=中证500, 000852=中证1000")
+    pool: str = Field("000300", description="000300/000905/000852 指数成分股；all=全 A 可交易股票")
     pool_limit: int = Field(30, description="从池子取前 N 只（数量越大越慢）")
     preset: str = Field("balanced", description="策略预设：balanced/momentum/value/growth/dividend")
     min_score: float = Field(0, description="综合分下限（0-100）")
     top_n: int = Field(10, description="最终返回前 N 只")
-    use_llm: bool = Field(False, description="是否用 LLM 分析情绪面（慢）")
+    use_llm: bool = Field(False, description="是否用 LLM 分析情绪面（慢)")
     as_of: Optional[str] = None
     custom_weights: Optional[dict] = Field(None, description="覆盖 preset 的自定义四维权重")
+
+    # 全 A 池 (pool="all") 时可用的粗过滤
+    exchange: Optional[str] = Field(None, description="交易所过滤：sh/sz/bj/main/kcb/cyb/all")
+    min_price: Optional[float] = Field(None, description="最低股价（元）")
+    max_price: Optional[float] = Field(None, description="最高股价（元）")
+    min_market_cap: Optional[float] = Field(None, description="最小总市值（亿元）")
+    max_market_cap: Optional[float] = Field(None, description="最大总市值（亿元）")
+    exclude_st: bool = Field(True, description="是否排除 ST/*ST/退市股票")
 
 
 # 策略预设 = 权重方案
@@ -355,10 +366,36 @@ def market_search(q: str, limit: int = 10):
 @router.post("/score", summary="给单只股票打分")
 def score(req: ScoreRequest):
     from analysis.scorer import score_one
+    # 权重来源优先级：custom_weights > preset > 默认（configs/strategy.yaml 里的 balanced）
+    weights = None
+    weights_source = "default"
+    weights_source_name = "默认"
+    if req.custom_weights:
+        weights = req.custom_weights
+        weights_source = "custom"
+        weights_source_name = "自定义"
+    elif req.preset and req.preset in PRESET_WEIGHTS:
+        weights = PRESET_WEIGHTS[req.preset]
+        weights_source = req.preset
+        weights_source_name = PRESET_LABELS.get(req.preset, {}).get("name", req.preset)
     try:
-        return score_one(req.symbol, as_of=req.as_of, use_llm=req.use_llm)
+        result = score_one(req.symbol, as_of=req.as_of, weights=weights, use_llm=req.use_llm)
+        result["weights"] = weights or _default_weights()
+        result["weights_source"] = weights_source
+        result["weights_source_name"] = weights_source_name
+        return result
     except Exception as e:
         raise HTTPException(500, f"评分失败: {e}")
+
+
+def _default_weights() -> dict:
+    """兜底：读 configs/strategy.yaml 里的 swing_v1 权重。"""
+    import yaml
+    try:
+        with open("configs/strategy.yaml", encoding="utf-8") as f:
+            return yaml.safe_load(f)["swing_v1"]["weights"]
+    except Exception:
+        return PRESET_WEIGHTS["balanced"]
 
 
 @router.post("/rank", summary="给一组股票打分并排序")
@@ -378,44 +415,135 @@ def screen_presets():
     }
 
 
+def _exchange_of(code: str) -> str:
+    """按代码首位判断交易所/板块：sh/sz/bj + main/kcb/cyb。"""
+    if code.startswith("60"):
+        return "sh_main"
+    if code.startswith("688"):
+        return "kcb"          # 科创板
+    if code.startswith("00"):
+        return "sz_main"
+    if code.startswith("30"):
+        return "cyb"          # 创业板
+    if code.startswith(("83", "87", "43")):
+        return "bj"
+    return "other"
+
+
+def _filter_all_a_pool(req: "ScreenRequest") -> list[dict]:
+    """
+    从全 A 实时快照拉数据并按用户条件过滤，返回 [{symbol, name}, ...]。
+    过滤维度：交易所/板块、股价区间、总市值区间、是否排除 ST。
+    """
+    from data_layer import market
+    try:
+        df = market.snapshot()
+    except Exception as e:
+        raise HTTPException(503, f"全 A 快照数据源不可用：{e}")
+    if df is None or df.empty:
+        raise HTTPException(503, "全 A 快照为空")
+
+    code_col = next((c for c in df.columns if c in ("代码", "symbol")), None)
+    name_col = next((c for c in df.columns if c in ("名称", "name")), None)
+    price_col = next((c for c in df.columns if c in ("最新价", "现价", "close")), None)
+    mcap_col = next((c for c in df.columns if "总市值" in c), None)
+    if not (code_col and name_col):
+        raise HTTPException(500, f"快照数据列不识别：{list(df.columns)[:10]}")
+
+    df = df.copy()
+    df[code_col] = df[code_col].astype(str).str.zfill(6)
+
+    # 交易所 / 板块过滤
+    exch = (req.exchange or "all").lower()
+    if exch != "all":
+        loc = df[code_col].map(_exchange_of)
+        mask_map = {
+            "sh":   loc.isin({"sh_main", "kcb"}),
+            "sz":   loc.isin({"sz_main", "cyb"}),
+            "bj":   loc == "bj",
+            "main": loc.isin({"sh_main", "sz_main"}),
+            "kcb":  loc == "kcb",
+            "cyb":  loc == "cyb",
+        }
+        if exch not in mask_map:
+            raise HTTPException(400, f"不支持的 exchange: {exch}")
+        df = df[mask_map[exch]]
+
+    # 排除 ST/退市
+    if req.exclude_st:
+        df = df[~df[name_col].astype(str).str.contains("ST|退", case=False, regex=True, na=False)]
+
+    # 股价过滤
+    if price_col:
+        pr = pd.to_numeric(df[price_col], errors="coerce")
+        df = df[pr.notna() & (pr > 0)]
+        if req.min_price is not None:
+            df = df[pd.to_numeric(df[price_col], errors="coerce") >= req.min_price]
+        if req.max_price is not None:
+            df = df[pd.to_numeric(df[price_col], errors="coerce") <= req.max_price]
+
+    # 市值过滤（用户输入是亿元；AkShare 总市值单位是元）
+    if mcap_col:
+        mv_yi = pd.to_numeric(df[mcap_col], errors="coerce") / 1e8
+        df = df[mv_yi.notna()]
+        if req.min_market_cap is not None:
+            df = df[mv_yi.loc[df.index] >= req.min_market_cap]
+        if req.max_market_cap is not None:
+            df = df[mv_yi.loc[df.index] <= req.max_market_cap]
+        # 按总市值降序，让大的先被评分（更快得到有意义结果）
+        df = df.assign(_mv_sort=pd.to_numeric(df[mcap_col], errors="coerce")).sort_values("_mv_sort", ascending=False)
+
+    # 截取前 pool_limit
+    subset_df = df.head(req.pool_limit)
+    return [
+        {"symbol": str(row[code_col]).zfill(6), "name": str(row[name_col])}
+        for _, row in subset_df.iterrows()
+    ]
+
+
 @router.post("/screen", summary="股票筛选器（首页核心 API）")
 def screen(req: ScreenRequest):
     """
     一站式：
-    1) 拉指定指数成分股，取前 pool_limit 只
+    1) 拉指定指数成分股（或全 A 快照），取前 pool_limit 只
     2) 按 preset 权重打四维分
     3) 过滤 total >= min_score
     4) 返回 top_n 只
     """
     from data_layer import universe as uni
     from analysis import scorer as _scorer
-    from analysis import technical, fundamental_score, moneyflow_score
-    import pandas as pd
 
     fn_map = {
         "000300": uni.hs300_constituents,
         "000905": uni.csi500_constituents,
         "000852": uni.csi1000_constituents,
     }
-    if req.pool not in fn_map:
-        raise HTTPException(400, f"不支持的指数: {req.pool}")
 
-    df_idx = fn_map[req.pool]()
-    code_col = next((c for c in df_idx.columns if "成分券代码" in c), None) \
-        or next((c for c in df_idx.columns if "代码" in c and "指数" not in c), None)
-    name_col = next((c for c in df_idx.columns if "成分券名称" in c), None) \
-        or next((c for c in df_idx.columns if "名称" in c and "指数" not in c and "英文" not in c and "交易所" not in c), None)
+    if req.pool == "all":
+        # 全 A 池：拉实时快照，按用户过滤条件筛
+        subset_items = _filter_all_a_pool(req)
+    elif req.pool in fn_map:
+        df_idx = fn_map[req.pool]()
+        code_col = next((c for c in df_idx.columns if "成分券代码" in c), None) \
+            or next((c for c in df_idx.columns if "代码" in c and "指数" not in c), None)
+        name_col = next((c for c in df_idx.columns if "成分券名称" in c), None) \
+            or next((c for c in df_idx.columns if "名称" in c and "指数" not in c and "英文" not in c and "交易所" not in c), None)
+        subset_items = []
+        for _, row in df_idx.head(req.pool_limit).iterrows():
+            sym = str(row[code_col]).zfill(6)
+            name = str(row[name_col]) if name_col else sym
+            subset_items.append({"symbol": sym, "name": name})
+    else:
+        raise HTTPException(400, f"不支持的股票池: {req.pool}")
 
-    subset = df_idx.head(req.pool_limit)
     weights = req.custom_weights if req.custom_weights else PRESET_WEIGHTS.get(req.preset, PRESET_WEIGHTS["balanced"])
 
     rows = []
-    for _, row in subset.iterrows():
-        sym = str(row[code_col]).zfill(6)
-        name = str(row[name_col]) if name_col else sym
-        r = _scorer.score_one(sym, as_of=req.as_of, weights=weights, use_llm=req.use_llm)
-        r["name"] = name
+    for it in subset_items:
+        r = _scorer.score_one(it["symbol"], as_of=req.as_of, weights=weights, use_llm=req.use_llm)
+        r["name"] = it["name"]
         rows.append(r)
+    subset = subset_items  # 兼容后面的 pool_size
 
     # 过滤 + 排序
     filtered = [r for r in rows if r["total"] >= req.min_score]

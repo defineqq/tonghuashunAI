@@ -275,6 +275,14 @@ window.closePresetHelp = function() {
 loadPresets();
 
 // -------- 选股 --------
+// 记住上一次筛选用的权重信息，供个股分析跳转时复用
+window.lastScreenContext = null;
+
+window.onScreenPoolChange = function() {
+  const pool = document.getElementById('screen-pool').value;
+  document.getElementById('all-a-filters').classList.toggle('hidden', pool !== 'all');
+};
+
 async function runScreen() {
   const btn = document.getElementById('screen-btn');
   const status = document.getElementById('screen-status');
@@ -285,23 +293,44 @@ async function runScreen() {
   resultEl.innerHTML = '';
 
   try {
+    const pool = document.getElementById('screen-pool').value;
     const body = {
-      pool: document.getElementById('screen-pool').value,
+      pool,
       pool_limit: parseInt(document.getElementById('screen-pool-limit').value),
       preset: selectedPreset === 'custom' ? 'balanced' : selectedPreset,
       min_score: parseFloat(document.getElementById('screen-min-score').value) || 0,
       top_n: parseInt(document.getElementById('screen-top-n').value) || 10,
       use_llm: document.getElementById('screen-llm').checked,
     };
-    // 自定义权重（后端需支持）
     if (selectedPreset === 'custom' && customWeights) {
       body.custom_weights = customWeights;
     }
+    // 全 A 池附加过滤
+    if (pool === 'all') {
+      body.exchange = document.getElementById('all-a-exchange').value || 'all';
+      const mp = parseFloat(document.getElementById('all-a-min-price').value);
+      const xp = parseFloat(document.getElementById('all-a-max-price').value);
+      const mm = parseFloat(document.getElementById('all-a-min-mcap').value);
+      const xm = parseFloat(document.getElementById('all-a-max-mcap').value);
+      if (!isNaN(mp)) body.min_price = mp;
+      if (!isNaN(xp)) body.max_price = xp;
+      if (!isNaN(mm)) body.min_market_cap = mm;
+      if (!isNaN(xm)) body.max_market_cap = xm;
+      body.exclude_st = document.getElementById('all-a-exclude-st').checked;
+    }
+
     const r = await API('/screen', { method: 'POST', body: JSON.stringify(body) });
+    // 保存筛选时的权重上下文，供个股分析页复用
+    window.lastScreenContext = {
+      preset: r.preset,
+      preset_name: r.preset_name,
+      weights: r.weights,
+      custom_weights: body.custom_weights || null,
+    };
     status.innerHTML = `已从 <b>${r.pool_size}</b> 只中筛选出综合分 ≥ ${body.min_score} 的 <b>${r.matched}</b> 只，展示前 <b>${r.results.length}</b> 只 · 风格 <b>${r.preset_name}</b>`;
 
     if (r.results.length === 0) {
-      resultEl.innerHTML = '<div class="p-8 text-center text-slate-500">没有股票达到筛选条件，试试降低"综合分下限"？</div>';
+      resultEl.innerHTML = '<div class="p-8 text-center text-slate-500">没有股票达到筛选条件，试试降低"综合分下限"或放宽过滤？</div>';
     } else {
       resultEl.innerHTML = renderScreenResults(r.results, r.weights);
     }
@@ -372,6 +401,8 @@ window.viewDetailFrom = function(symbol, name) {
   document.querySelector('[data-tab="detail"]').click();
   document.getElementById('detail-search').value = name || symbol;
   document.getElementById('detail-search').dataset.code = symbol;
+  // 跳转来源：继承选股页的权重上下文
+  window.detailWeightsFromScreen = window.lastScreenContext || null;
   runDetail();
 };
 
@@ -434,10 +465,19 @@ async function runDetail() {
   resultEl.classList.add('hidden');
 
   try {
-    const r = await API('/score', {
-      method: 'POST',
-      body: JSON.stringify({ symbol: code, use_llm: document.getElementById('detail-llm').checked }),
-    });
+    const body = { symbol: code, use_llm: document.getElementById('detail-llm').checked };
+    // 若从选股页跳过来，带上当时的权重；否则用当前所选的 preset/custom
+    const ctx = window.detailWeightsFromScreen;
+    if (ctx) {
+      if (ctx.custom_weights) body.custom_weights = ctx.custom_weights;
+      else if (ctx.preset) body.preset = ctx.preset;
+    } else {
+      if (selectedPreset === 'custom' && customWeights) body.custom_weights = customWeights;
+      else if (selectedPreset) body.preset = selectedPreset;
+    }
+    const r = await API('/score', { method: 'POST', body: JSON.stringify(body) });
+    // 用完就清，避免手动搜索时被复用
+    window.detailWeightsFromScreen = null;
     status.textContent = `分析完成 · ${code}`;
     resultEl.classList.remove('hidden');
     resultEl.innerHTML = renderDetail(r);
@@ -449,48 +489,171 @@ async function runDetail() {
 }
 window.runDetail = runDetail;
 
+// 每个子项的中文标签 + 一句话解释，跟后端 analysis/*.py 的实际实现对齐
+const SUB_LABELS = {
+  technical: {
+    trend:      { label: '趋势（均线多头）', help: '价 > MA5 > MA20 > MA60 满 3 项=100，满 2=75，满 1=50，全不满=25' },
+    momentum:   { label: '动量（近 20 日涨幅）', help: '涨幅 -15% 起 20 分，0% 约 55，+5% 约 70，+15% 约 90' },
+    rsi:        { label: 'RSI 强弱',       help: 'RSI(14) 在 45–65 健康区 85–100；<35 超卖或 >75 超买则减分' },
+    volume:     { label: '量能（放量比）', help: '近 5 日均量 / 近 20 日均量：1.0 中性，>1.5 放量 80+，<0.5 缩量 30-' },
+    volatility: { label: '波动率（ATR%）', help: 'ATR/价 1.5%–3.5% 为健康区 85+，过低（呆滞）或过高（剧烈）均减分' },
+  },
+  fundamental: {
+    valuation:     { label: '估值分位',   help: '当前 PE/PB 在过去 3 年中的分位，越低（越便宜）打分越高' },
+    profitability: { label: '盈利能力',   help: 'ROE > 15% 接近满分，8% 为中性 50，< 5% 差' },
+    growth:        { label: '成长性',     help: '营业收入同比增速，每 +1% 加 2 分（+25% 就 100）' },
+  },
+  moneyflow: {
+    northbound:  { label: '北向持仓变化', help: '近 5 日陆股通持股比例增减 0.5% ≈ 满分/零分' },
+    main_inflow: { label: '主力净流入',   help: '近 5 日主力资金净流入为正的天数占比 → 得分' },
+    turnover:    { label: '换手率',       help: '近 5 日平均换手率 4% 附近最高分；过低滞涨、过高异动均减分' },
+  },
+};
+
+function _subScoreList(subDict, dim) {
+  const labelMap = SUB_LABELS[dim] || {};
+  const keys = Object.keys(subDict || {});
+  if (!keys.length) return '<div class="text-xs text-slate-400 mt-2">（子项数据不可用，本维度按中性 50 分兜底）</div>';
+  return `
+    <div class="mt-3 space-y-2">
+      ${keys.map(k => {
+        const v = subDict[k];
+        const numeric = typeof v === 'number' ? v : parseFloat(v);
+        if (isNaN(numeric)) return '';
+        const info = labelMap[k] || { label: k, help: '' };
+        return `
+          <div>
+            <div class="flex justify-between text-xs">
+              <span class="text-slate-600" title="${info.help}">${info.label}</span>
+              <span class="${scoreColor(numeric)} font-medium">${numeric.toFixed(1)}</span>
+            </div>
+            <div class="score-bar"><div style="width:${Math.max(0,Math.min(100,numeric))}%; background:${scoreBarColor(numeric)}"></div></div>
+            ${info.help ? `<div class="text-[11px] text-slate-400 mt-0.5">${info.help}</div>` : ''}
+          </div>
+        `;
+      }).join('')}
+      <div class="text-[11px] text-slate-400 pt-1 border-t border-slate-100">
+        本维度得分 = 上述子项的<b>算术平均</b>
+      </div>
+    </div>
+  `;
+}
+
 function renderDetail(r) {
+  const w = r.weights || { technical: 0.35, fundamental: 0.20, sentiment: 0.20, moneyflow: 0.25 };
   const dimensions = [
-    { key: 'technical',   label: '技术面', desc: 'K 线走势、均线、动量、RSI、量能、波动率' },
-    { key: 'fundamental', label: '基本面', desc: '估值分位、ROE、营收增长' },
-    { key: 'sentiment',   label: '情绪面', desc: 'AI 读公告 & 新闻的情绪评分' },
-    { key: 'moneyflow',   label: '资金面', desc: '北向增持、主力净流入、换手率' },
+    { key: 'technical',   label: '技术面', color: '#3b82f6', desc: '看 K 线走势健不健康' },
+    { key: 'fundamental', label: '基本面', color: '#f59e0b', desc: '看公司质地好不好' },
+    { key: 'sentiment',   label: '情绪面', color: '#a855f7', desc: 'AI 读近期公告 / 新闻' },
+    { key: 'moneyflow',   label: '资金面', color: '#10b981', desc: '看聪明钱在不在买' },
   ];
   const sentDetail = r.detail?.sentiment || {};
   const sentHighlights = sentDetail.highlights || [];
   const sentRisks = sentDetail.risk_flags || [];
 
+  // 按权重算每一项的加权贡献（可能会因权重浮点略有偏差，用实际返回的 total 展示更准确）
+  const contribs = dimensions.map(d => ({
+    ...d,
+    score: r[d.key],
+    weight: (w[d.key] || 0),
+    contrib: (r[d.key] || 0) * (w[d.key] || 0),
+  }));
+  const sumContrib = contribs.reduce((s, c) => s + c.contrib, 0);
+
+  // 权重来源标签
+  const wsName = r.weights_source_name || '默认';
+  const wsColor = r.weights_source === 'custom' ? 'bg-blue-100 text-blue-700' :
+                  r.weights_source === 'default' ? 'bg-slate-100 text-slate-600' :
+                                                   'bg-emerald-100 text-emerald-700';
+
   return `
-    <div class="card p-6">
-      <div class="flex items-center justify-between mb-6">
+    <div class="card p-6 space-y-6">
+      <!-- 顶部：股票 + 总分 -->
+      <div class="flex items-center justify-between">
         <div>
           <div class="text-lg font-mono text-slate-500">${r.symbol}</div>
-          <div class="text-2xl font-semibold mt-1">${sentDetail.reason ? sentDetail.reason : '综合评分分析'}</div>
+          <div class="text-2xl font-semibold mt-1">
+            综合评分分析
+            <span class="ml-2 text-xs px-2 py-0.5 rounded ${wsColor} font-normal">权重来源：${wsName}</span>
+          </div>
+          <div class="text-xs text-slate-500 mt-1">分析日期：${r.as_of || '—'}</div>
         </div>
         <div class="text-right">
-          <div class="text-5xl font-bold ${scoreColor(r.total)}">${r.total.toFixed(1)}</div>
+          <div class="text-5xl font-bold ${scoreColor(r.total)}">${r.total.toFixed(2)}</div>
           <div class="text-xs text-slate-400 mt-1">综合分 · 满分 100</div>
         </div>
       </div>
 
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        ${dimensions.map(d => `
-          <div class="border border-slate-200 rounded-lg p-4">
-            <div class="flex items-center justify-between mb-1">
-              <div>
-                <div class="font-semibold text-sm">${d.label}</div>
-                <div class="text-xs text-slate-400 mt-0.5">${d.desc}</div>
+      <!-- 本次打分的权重占比 -->
+      <div class="p-4 bg-slate-50 border border-slate-200 rounded-lg">
+        <div class="text-sm font-semibold text-slate-700 mb-3">📐 本次打分使用的权重占比</div>
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+          ${contribs.map(c => `
+            <div class="p-3 bg-white rounded border border-slate-100">
+              <div class="flex items-center justify-between mb-1">
+                <span class="text-xs text-slate-500">${c.label}</span>
+                <span class="text-sm font-semibold">${(c.weight*100).toFixed(0)}%</span>
               </div>
-              <div class="text-2xl font-bold ${scoreColor(r[d.key])}">${r[d.key].toFixed(0)}</div>
+              <div class="h-2 rounded overflow-hidden bg-slate-100">
+                <div style="width:${c.weight*100}%; background:${c.color}; height:100%"></div>
+              </div>
             </div>
-            <div class="score-bar mt-2"><div style="width:${r[d.key]}%; background:${scoreBarColor(r[d.key])}"></div></div>
-            ${d.key === 'sentiment' && sentDetail.reason ? `<div class="mt-2 text-xs text-slate-600">${sentDetail.reason}</div>` : ''}
-          </div>
-        `).join('')}
+          `).join('')}
+        </div>
+        <div class="text-xs text-slate-500 mt-3 leading-relaxed">
+          综合分 = 技术面 × ${(w.technical*100).toFixed(0)}%
+          + 基本面 × ${(w.fundamental*100).toFixed(0)}%
+          + 情绪面 × ${(w.sentiment*100).toFixed(0)}%
+          + 资金面 × ${(w.moneyflow*100).toFixed(0)}%
+        </div>
+      </div>
+
+      <!-- 四个维度 · 子项明细 -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        ${dimensions.map(d => {
+          const subDict = r.detail?.[d.key];
+          const isSent = d.key === 'sentiment';
+          const sub = isSent ? null : (subDict || {});
+          return `
+            <div class="border border-slate-200 rounded-lg p-4">
+              <div class="flex items-center justify-between mb-1">
+                <div>
+                  <div class="font-semibold text-sm flex items-center gap-2">
+                    <span>${d.label}</span>
+                    <span class="text-[11px] px-1.5 py-0.5 rounded" style="background:${d.color}22; color:${d.color}">权重 ${(w[d.key]*100).toFixed(0)}%</span>
+                  </div>
+                  <div class="text-xs text-slate-400 mt-0.5">${d.desc}</div>
+                </div>
+                <div class="text-2xl font-bold ${scoreColor(r[d.key])}">${r[d.key].toFixed(0)}</div>
+              </div>
+              <div class="score-bar mt-2"><div style="width:${r[d.key]}%; background:${scoreBarColor(r[d.key])}"></div></div>
+              ${isSent
+                ? (sentDetail.reason
+                    ? `<div class="mt-3 text-xs text-slate-600 leading-relaxed">${sentDetail.reason}</div>
+                       <div class="mt-2 text-[11px] text-slate-400">AI provider: ${sentDetail.provider || '未知'}${sentDetail.error ? ' · 错误：'+sentDetail.error : ''}</div>`
+                    : '<div class="mt-3 text-xs text-slate-400">未启用 AI 情绪或数据不可用，按中性 50 分兜底</div>')
+                : _subScoreList(sub, d.key)}
+              <div class="mt-3 text-xs bg-slate-50 rounded p-2 leading-relaxed">
+                <b>加权贡献</b>：${r[d.key].toFixed(1)} × ${(w[d.key]*100).toFixed(0)}%
+                = <span class="font-semibold ${scoreColor(r[d.key])}">${(r[d.key]*w[d.key]).toFixed(2)}</span> 分
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+
+      <!-- 计算公式复盘 -->
+      <div class="p-4 bg-blue-50 border border-blue-100 rounded-lg text-sm">
+        <div class="font-semibold text-blue-900 mb-2">🧮 综合分是这么算出来的</div>
+        <div class="font-mono text-xs md:text-sm text-blue-900 leading-relaxed break-all">
+          ${contribs.map(c => `${c.score.toFixed(1)} × ${(c.weight*100).toFixed(0)}%`).join('  +  ')}
+          <br>= ${contribs.map(c => c.contrib.toFixed(2)).join('  +  ')}
+          <br>= <span class="text-lg font-bold ${scoreColor(r.total)}">${sumContrib.toFixed(2)}</span> ≈ <b>${r.total.toFixed(2)}</b> 分
+        </div>
       </div>
 
       ${sentHighlights.length ? `
-        <div class="mt-6 p-4 bg-emerald-50 rounded-lg">
+        <div class="p-4 bg-emerald-50 rounded-lg">
           <div class="text-sm font-semibold text-emerald-800 mb-2">✅ AI 识别到的利好点</div>
           <ul class="text-sm text-emerald-700 list-disc list-inside space-y-1">
             ${sentHighlights.map(h => `<li>${h}</li>`).join('')}
@@ -498,7 +661,7 @@ function renderDetail(r) {
         </div>
       ` : ''}
       ${sentRisks.length ? `
-        <div class="mt-3 p-4 bg-red-50 rounded-lg">
+        <div class="p-4 bg-red-50 rounded-lg">
           <div class="text-sm font-semibold text-red-800 mb-2">⚠️ AI 识别到的风险</div>
           <ul class="text-sm text-red-700 list-disc list-inside space-y-1">
             ${sentRisks.map(h => `<li>${h}</li>`).join('')}
@@ -506,8 +669,8 @@ function renderDetail(r) {
         </div>
       ` : ''}
 
-      <details class="mt-6 text-xs">
-        <summary class="cursor-pointer text-slate-500">四个维度的子项明细（JSON）</summary>
+      <details class="text-xs">
+        <summary class="cursor-pointer text-slate-500">查看原始 JSON（调试用）</summary>
         <pre class="mt-2 p-3 bg-slate-50 rounded text-xs overflow-auto">${JSON.stringify(r.detail, null, 2)}</pre>
       </details>
     </div>
