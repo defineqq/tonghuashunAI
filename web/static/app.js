@@ -85,53 +85,81 @@ async function refreshStatus() {
 }
 refreshStatus();
 
-// 数据源健康检查
-async function refreshHealth() {
+// 数据接口情况（每 60s 定时刷新）
+window.refreshHealth = async function refreshHealth() {
   const banner = document.getElementById('health-banner');
   const icon = document.getElementById('health-icon');
   const title = document.getElementById('health-title');
   const subtitle = document.getElementById('health-subtitle');
   const detail = document.getElementById('health-detail');
+  const last = document.getElementById('health-last');
   if (!banner) return;
   banner.classList.remove('hidden');
-  title.textContent = '正在检查数据源...';
-  subtitle.textContent = '首次检查约 5 秒';
-  icon.textContent = '⏳';
+  if (!banner.dataset.everLoaded) {
+    title.textContent = '正在检查数据接口...';
+    subtitle.textContent = '首次检查约 5 秒';
+    icon.textContent = '⏳';
+  }
   try {
     const r = await API('/status/datasources');
+    banner.dataset.everLoaded = '1';
     if (r.healthy) {
       icon.textContent = '✅';
       banner.className = 'card p-4 border-l-4 border-emerald-400';
-      title.textContent = `所有数据源正常 (${r.ok_count}/${r.total})`;
-      subtitle.textContent = '打分和回测应能得到真实数据';
+      title.textContent = `数据接口情况：全部可用 (${r.ok_count}/${r.total})`;
+      subtitle.textContent = '打分和回测能得到真实数据';
     } else if (r.ok_count > 0) {
       icon.textContent = '⚠️';
       banner.className = 'card p-4 border-l-4 border-amber-400';
-      title.textContent = `部分数据源可用 (${r.ok_count}/${r.total})`;
-      subtitle.textContent = '缺失的维度会用中性 50 分兜底，仍可正常筛选';
+      title.textContent = `数据接口情况：${r.ok_count}/${r.total} 可用`;
+      subtitle.textContent = '缺失的维度会用中性 50 分兜底';
     } else {
       icon.textContent = '❌';
       banner.className = 'card p-4 border-l-4 border-red-400';
-      title.textContent = '所有数据源不可用';
-      subtitle.textContent = '网络问题？打分会全部返回 50，请稍后重试';
+      title.textContent = '数据接口情况：全部不可用';
+      subtitle.textContent = '网络问题？打分会全部返回 50';
     }
-    detail.innerHTML = r.checks.map(c => `
-      <div class="flex items-center justify-between py-1">
-        <span class="flex items-center gap-2">
-          <span>${c.ok ? '✅' : '❌'}</span>
-          <span>${c.name}</span>
+    if (last) last.textContent = '刷新于 ' + new Date(r.checked_at).toLocaleTimeString();
+
+    detail.innerHTML = r.checks.map(c => {
+      const sourcesHtml = (c.sources || []).map(s => `
+        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px]
+          ${s.ok ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-600'}">
+          <span>${s.ok ? '●' : '○'}</span>
+          <span>${s.source}</span>
+          <span class="text-slate-400">${s.latency_ms}ms</span>
         </span>
-        <span class="text-slate-400 text-xs">${c.detail} · ${c.latency_ms}ms</span>
-      </div>
-    `).join('');
+      `).join('');
+      return `
+        <div class="border border-slate-100 rounded p-2">
+          <div class="flex items-center justify-between mb-1">
+            <span class="flex items-center gap-2">
+              <span>${c.ok ? '✅' : '❌'}</span>
+              <span class="font-medium">${c.name}</span>
+              ${c.active_source && c.active_source !== '—' ? `
+                <span class="ml-1 text-[11px] px-2 py-0.5 rounded bg-blue-50 text-blue-700">
+                  当前使用：${c.active_source}
+                </span>
+              ` : ''}
+            </span>
+          </div>
+          ${c.note ? `<div class="text-[11px] text-slate-500 mb-1.5">${c.note}</div>` : ''}
+          <div class="flex flex-wrap gap-1.5">${sourcesHtml || '<span class="text-slate-400 text-[11px]">无备选源信息</span>'}</div>
+        </div>
+      `;
+    }).join('');
   } catch (e) {
     icon.textContent = '❌';
     banner.className = 'card p-4 border-l-4 border-red-400';
-    title.textContent = '健康检查失败';
+    title.textContent = '数据接口情况检查失败';
     subtitle.textContent = e.message;
   }
-}
+};
 refreshHealth();
+// 每 60 秒自动刷新一次
+if (!window._healthTimer) {
+  window._healthTimer = setInterval(() => refreshHealth(), 60_000);
+}
 
 window.toggleHealthPanel = function() {
   const detail = document.getElementById('health-detail');
@@ -279,9 +307,22 @@ loadPresets();
 window.lastScreenContext = null;
 
 window.onScreenPoolChange = function() {
-  const pool = document.getElementById('screen-pool').value;
-  document.getElementById('all-a-filters').classList.toggle('hidden', pool !== 'all');
+  const sel = document.getElementById('screen-pool');
+  const panel = document.getElementById('all-a-filters');
+  if (!sel || !panel) return;
+  panel.classList.toggle('hidden', sel.value !== 'all');
 };
+
+// 双保险：直接注册 change 监听，避免 inline onchange 被 CSP 拦或被覆盖
+document.addEventListener('DOMContentLoaded', () => {
+  const sel = document.getElementById('screen-pool');
+  if (sel) {
+    sel.addEventListener('change', window.onScreenPoolChange);
+    window.onScreenPoolChange();  // 页面初始时也同步一次
+  }
+});
+// DOMContentLoaded 可能已经触发（脚本在底部），再兜底一次
+setTimeout(() => window.onScreenPoolChange && window.onScreenPoolChange(), 0);
 
 async function runScreen() {
   const btn = document.getElementById('screen-btn');

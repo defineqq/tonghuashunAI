@@ -147,8 +147,91 @@ def minute(
     return df.sort_values("datetime").reset_index(drop=True)
 
 
+# 记录快照最近一次实际用了哪个源，供健康检查/前端展示
+_snapshot_last_source: str | None = None
+
+
+def snapshot_last_source() -> str | None:
+    """返回上次 snapshot() 成功用的数据源标签。可能是 None（尚未调用或全部失败）。"""
+    return _snapshot_last_source
+
+
 @cached("market", max_age_hours=0.1)  # 6 分钟缓存
 def snapshot() -> pd.DataFrame:
-    """全 A 实时快照（收盘价、涨跌幅、成交量、市值等）。"""
+    """
+    全 A 实时快照（收盘价、涨跌幅、成交量、市值等）。
+
+    多源回退顺序：
+      1. eastmoney 一把拉全 A（最全，含总市值）
+      2. sina 一把拉全 A（列名不同，做映射）
+      3. 分交易所 eastmoney（sh + sz + kc + cy + bj）拼接
+    每个源尝试到 empty/异常都算失败，进入下一个。全失败才抛 RuntimeError。
+    """
+    global _snapshot_last_source
     import akshare as ak
-    return ak.stock_zh_a_spot_em()
+    errors = []
+
+    # 1) 东财一把拉
+    try:
+        df = ak.stock_zh_a_spot_em()
+        if df is not None and not df.empty:
+            _snapshot_last_source = "eastmoney"
+            return df
+        errors.append("eastmoney: empty")
+    except Exception as e:
+        errors.append(f"eastmoney: {type(e).__name__}: {str(e)[:60]}")
+
+    # 2) 新浪一把拉（列名不同，需要映射到东财风格）
+    try:
+        df = ak.stock_zh_a_spot()
+        if df is not None and not df.empty:
+            # 新浪列：代码/symbol、名称/name、trade/最新价、marketcapital/总市值...
+            rename_map = {
+                "symbol": "代码", "code": "代码",
+                "name": "名称",
+                "trade": "最新价",
+                "changepercent": "涨跌幅",
+                "volume": "成交量",
+                "amount": "成交额",
+                "turnoverratio": "换手率",
+                "pe": "市盈率-动态",
+                "pb": "市净率",
+                "mktcap": "总市值",
+                "nmc": "流通市值",
+            }
+            df = df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns})
+            # 新浪 symbol 是 sh600519，剥出 6 位
+            if "代码" in df.columns:
+                df["代码"] = df["代码"].astype(str).str.extract(r"(\d{6})", expand=False).fillna(df["代码"])
+            _snapshot_last_source = "sina"
+            return df
+        errors.append("sina: empty")
+    except Exception as e:
+        errors.append(f"sina: {type(e).__name__}: {str(e)[:60]}")
+
+    # 3) 分交易所拼接
+    try:
+        parts = []
+        for name, fn in [
+            ("sh", ak.stock_sh_a_spot_em),
+            ("sz", ak.stock_sz_a_spot_em),
+            ("kc", ak.stock_kc_a_spot_em),
+            ("cy", ak.stock_cy_a_spot_em),
+            ("bj", ak.stock_bj_a_spot_em),
+        ]:
+            try:
+                sub = fn()
+                if sub is not None and not sub.empty:
+                    parts.append(sub)
+            except Exception as e:
+                errors.append(f"per_exchange:{name}: {type(e).__name__}")
+        if parts:
+            df = pd.concat(parts, ignore_index=True, sort=False)
+            _snapshot_last_source = f"per_exchange({len(parts)}/5)"
+            return df
+        errors.append("per_exchange: all empty")
+    except Exception as e:
+        errors.append(f"per_exchange: {type(e).__name__}: {str(e)[:60]}")
+
+    _snapshot_last_source = None
+    raise RuntimeError(f"所有全 A 快照源都失败: {'; '.join(errors)}")

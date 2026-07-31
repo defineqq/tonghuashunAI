@@ -148,90 +148,132 @@ def get_status():
     }
 
 
-@router.get("/status/datasources", summary="数据源健康检查")
+def _probe(fn, ok_check=lambda x: x is not None and hasattr(x, "empty") and not x.empty):
+    """执行一个数据源探针，统一返回 (ok, detail, latency_ms, error)。"""
+    import time
+    t0 = time.time()
+    try:
+        result = fn()
+        latency = int((time.time() - t0) * 1000)
+        if ok_check(result):
+            detail = f"{len(result)} 行" if hasattr(result, "__len__") else "OK"
+            return True, detail, latency, None
+        return False, "空", latency, None
+    except Exception as e:
+        latency = int((time.time() - t0) * 1000)
+        return False, str(e)[:80], latency, type(e).__name__
+
+
+@router.get("/status/datasources", summary="数据接口情况")
 def check_datasources():
     """
-    实时探测各数据源是否可用。用一只测试股（贵州茅台）跑一遍关键接口。
-    结果被短时缓存（1 分钟）。
+    实时探测各数据源。每一类接口尝试所有备选源，报告：
+      - 主源当前可用性
+      - 备选源可用性
+      - 当前会真正使用哪个源
+    结果被短时缓存（30 秒）。前端定时轮询。
     """
     import time
     from data_layer.cache import _data_dir
-    from pathlib import Path
     import json as _json
 
-    # 简单文件缓存 1 分钟
     cache_file = _data_dir() / "_health.json"
-    if cache_file.exists() and (time.time() - cache_file.stat().st_mtime) < 60:
+    if cache_file.exists() and (time.time() - cache_file.stat().st_mtime) < 30:
         try:
             return _json.loads(cache_file.read_text(encoding="utf-8"))
         except Exception:
             pass
 
-    checks = []
     test_symbol = "600519"
+    checks = []
 
-    # 1) 日线（多源回退）
-    t0 = time.time()
-    try:
-        from data_layer import market
-        df = market.daily(test_symbol, start="2024-11-01", end="2024-12-31")
-        checks.append({
-            "name": "日线行情", "key": "daily",
-            "ok": not df.empty,
-            "latency_ms": int((time.time() - t0) * 1000),
-            "detail": f"{len(df)} 行" if not df.empty else "空",
-        })
-    except Exception as e:
-        checks.append({"name": "日线行情", "key": "daily", "ok": False,
-                       "latency_ms": int((time.time() - t0) * 1000), "detail": str(e)[:80]})
+    # --- 1. 日线行情（多源）---
+    import akshare as ak
+    from data_layer.market import _try_eastmoney, _try_sina, _try_tencent
+    daily_sources = []
+    for name, fn in [("eastmoney", _try_eastmoney), ("sina", _try_sina), ("tencent", _try_tencent)]:
+        ok, detail, lat, err = _probe(lambda fn=fn: fn(test_symbol, "2024-11-01", "2024-12-31", "qfq"))
+        daily_sources.append({"source": name, "ok": ok, "latency_ms": lat, "detail": detail})
+    active = next((s["source"] for s in daily_sources if s["ok"]), None)
+    checks.append({
+        "name": "日线行情", "key": "daily",
+        "ok": active is not None,
+        "active_source": active or "—",
+        "sources": daily_sources,
+        "note": "多源自动回退：东财 → 新浪 → 腾讯",
+    })
 
-    # 2) 成分股
-    t0 = time.time()
-    try:
-        from data_layer import universe
-        df = universe.hs300_constituents()
-        checks.append({"name": "沪深300 成分股", "key": "universe",
-                       "ok": len(df) > 200, "latency_ms": int((time.time() - t0) * 1000),
-                       "detail": f"{len(df)} 只"})
-    except Exception as e:
-        checks.append({"name": "沪深300 成分股", "key": "universe", "ok": False,
-                       "latency_ms": int((time.time() - t0) * 1000), "detail": str(e)[:80]})
+    # --- 2. 全 A 快照（多源） ---
+    snapshot_sources = []
+    # 东财
+    ok, detail, lat, err = _probe(lambda: ak.stock_zh_a_spot_em())
+    snapshot_sources.append({"source": "eastmoney", "ok": ok, "latency_ms": lat, "detail": detail})
+    # 新浪
+    ok, detail, lat, err = _probe(lambda: ak.stock_zh_a_spot())
+    snapshot_sources.append({"source": "sina", "ok": ok, "latency_ms": lat, "detail": detail})
+    active = next((s["source"] for s in snapshot_sources if s["ok"]), None)
+    if not active:
+        # 试探分交易所是否可用（只 ping sh 主板一个当代表，避免探针本身太慢）
+        ok, detail, lat, err = _probe(lambda: ak.stock_sh_a_spot_em())
+        snapshot_sources.append({"source": "per_exchange(sh)", "ok": ok, "latency_ms": lat, "detail": detail})
+        if ok:
+            active = "per_exchange"
+    checks.append({
+        "name": "全 A 实时快照", "key": "snapshot",
+        "ok": active is not None,
+        "active_source": active or "—",
+        "sources": snapshot_sources,
+        "note": "供「股票池 = 全 A」使用。回退：东财 → 新浪 → 分交易所拼接",
+    })
 
-    # 3) 北向资金（比主力资金流轻量）
-    t0 = time.time()
-    try:
-        from data_layer import moneyflow
-        df = moneyflow.northbound_daily()
-        checks.append({"name": "北向资金", "key": "northbound", "ok": not df.empty,
-                       "latency_ms": int((time.time() - t0) * 1000),
-                       "detail": f"{len(df)} 行" if not df.empty else "空"})
-    except Exception as e:
-        checks.append({"name": "北向资金", "key": "northbound", "ok": False,
-                       "latency_ms": int((time.time() - t0) * 1000), "detail": str(e)[:80]})
+    # --- 3. 沪深 300 成分股 ---
+    from data_layer import universe
+    universe_sources = []
+    ok, detail, lat, err = _probe(lambda: ak.index_stock_cons_csindex(symbol="000300"))
+    universe_sources.append({"source": "csindex", "ok": ok, "latency_ms": lat, "detail": detail})
+    active = "csindex" if ok else None
+    checks.append({
+        "name": "指数成分股", "key": "universe",
+        "ok": ok, "active_source": active or "—",
+        "sources": universe_sources,
+        "note": "沪深 300 / 中证 500 / 中证 1000 成分股（中证指数官方）",
+    })
 
-    # 4) 财报
-    t0 = time.time()
-    try:
-        from data_layer import fundamental
-        df = fundamental.financial_abstract(test_symbol)
-        checks.append({"name": "财务摘要", "key": "fundamental", "ok": not df.empty,
-                       "latency_ms": int((time.time() - t0) * 1000),
-                       "detail": f"{len(df)} 行" if not df.empty else "空"})
-    except Exception as e:
-        checks.append({"name": "财务摘要", "key": "fundamental", "ok": False,
-                       "latency_ms": int((time.time() - t0) * 1000), "detail": str(e)[:80]})
+    # --- 4. 北向资金 ---
+    from data_layer import moneyflow
+    nb_sources = []
+    ok, detail, lat, err = _probe(lambda: moneyflow.northbound_daily())
+    nb_sources.append({"source": "eastmoney", "ok": ok, "latency_ms": lat, "detail": detail})
+    checks.append({
+        "name": "北向资金", "key": "northbound",
+        "ok": ok, "active_source": "eastmoney" if ok else "—",
+        "sources": nb_sources,
+        "note": "资金面维度打分需要",
+    })
 
-    # 5) 财联社新闻（大盘情绪源）
-    t0 = time.time()
-    try:
-        from data_layer import sentiment
-        df = sentiment.cls_news(limit=5)
-        checks.append({"name": "财联社电报", "key": "cls_news", "ok": not df.empty,
-                       "latency_ms": int((time.time() - t0) * 1000),
-                       "detail": f"{len(df)} 条"})
-    except Exception as e:
-        checks.append({"name": "财联社电报", "key": "cls_news", "ok": False,
-                       "latency_ms": int((time.time() - t0) * 1000), "detail": str(e)[:80]})
+    # --- 5. 财务摘要 ---
+    from data_layer import fundamental
+    fin_sources = []
+    ok, detail, lat, err = _probe(lambda: fundamental.financial_abstract(test_symbol))
+    fin_sources.append({"source": "akshare_abstract", "ok": ok, "latency_ms": lat, "detail": detail})
+    checks.append({
+        "name": "财务摘要", "key": "fundamental",
+        "ok": ok, "active_source": "akshare" if ok else "—",
+        "sources": fin_sources,
+        "note": "基本面 ROE / 增长率打分需要",
+    })
+
+    # --- 6. 财联社电报 ---
+    from data_layer import sentiment as sent_data
+    news_sources = []
+    ok, detail, lat, err = _probe(lambda: sent_data.cls_news(limit=5))
+    news_sources.append({"source": "cls", "ok": ok, "latency_ms": lat, "detail": detail})
+    checks.append({
+        "name": "财联社电报", "key": "cls_news",
+        "ok": ok, "active_source": "cls" if ok else "—",
+        "sources": news_sources,
+        "note": "大盘情绪 / 日报生成用",
+    })
 
     ok_count = sum(1 for c in checks if c["ok"])
     result = {
