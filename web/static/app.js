@@ -1107,7 +1107,88 @@ async function loadIndicators() {
   } catch (e) {
     document.getElementById('buy-rules').innerHTML = `<div class="text-red-500 text-xs">加载指标失败: ${e.message}</div>`;
   }
+  // 同步更新 AI 徽章
+  refreshAiProviderBadge();
 }
+
+async function refreshAiProviderBadge() {
+  const badge = document.getElementById('ai-provider-badge');
+  if (!badge) return;
+  try {
+    const s = await API('/status');
+    if (s.llm.configured) {
+      badge.textContent = 'AI: ' + s.llm.provider;
+      badge.className = 'ml-auto text-[11px] px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200';
+    } else {
+      badge.textContent = 'AI 未配置 · 走 stub 示例';
+      badge.className = 'ml-auto text-[11px] px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200';
+    }
+  } catch {}
+}
+
+// AI 生成策略 —— 把结果 spec 填到 builder 表单里
+window.runAiGenerate = async function(save) {
+  const prompt = document.getElementById('ai-prompt').value.trim();
+  if (!prompt) { alert('请先输入策略描述'); return; }
+  const suggestedId = document.getElementById('builder-id').value.trim();
+  const suggestedName = document.getElementById('builder-name').value.trim();
+  const status = document.getElementById('ai-gen-status');
+  const btn = document.getElementById('ai-gen-btn');
+  const btnText = document.getElementById('ai-gen-btn-text');
+  const saveBtn = document.getElementById('ai-save-btn');
+  btn.disabled = true; saveBtn.disabled = true;
+  btnText.innerHTML = '<span class="spinner"></span> AI 分析中...';
+  status.textContent = '';
+  document.getElementById('ai-notes').classList.add('hidden');
+  try {
+    const r = await API('/strategies/builder/from_ai', {
+      method: 'POST',
+      body: JSON.stringify({
+        prompt,
+        suggested_id: suggestedId || undefined,
+        suggested_name: suggestedName || undefined,
+        save,
+      }),
+    });
+    const spec = r.spec;
+    // 1) 填 id / name
+    document.getElementById('builder-id').value = spec.id || '';
+    document.getElementById('builder-name').value = spec.name || '';
+    // 2) 填买/卖规则
+    builderBuyRules = (spec.buy?.rules || []).map(r => ({
+      indicator: r.indicator, op: r.op,
+      params: r.params || {}, value: r.value ?? null,
+    }));
+    builderSellRules = (spec.sell?.rules || []).map(r => ({
+      indicator: r.indicator, op: r.op,
+      params: r.params || {}, value: r.value ?? null,
+    }));
+    // 3) 设置 logic
+    const buyLogic = (spec.buy?.logic || 'AND').toUpperCase();
+    const sellLogic = (spec.sell?.logic || 'OR').toUpperCase();
+    document.querySelectorAll('input[name="buy-logic"]').forEach(el => el.checked = el.value === buyLogic);
+    document.querySelectorAll('input[name="sell-logic"]').forEach(el => el.checked = el.value === sellLogic);
+    renderRules('buy');
+    renderRules('sell');
+    // 4) 展示 AI 说明
+    const notes = document.getElementById('ai-notes');
+    notes.classList.remove('hidden');
+    notes.innerHTML = `
+      <div><b>AI 说明</b>（provider: ${r.provider}）</div>
+      <div class="mt-1">${r.notes || '（无）'}</div>
+      ${r.saved_to ? `<div class="mt-2 text-emerald-600">✓ 已保存到 ${r.saved_to}，可直接在回测里选择</div>` : ''}
+    `;
+    status.innerHTML = save
+      ? '<span class="text-emerald-600">✓ AI 已生成并保存</span>'
+      : '<span class="text-emerald-600">✓ AI 已把规则填到下方，检查后点「保存策略」</span>';
+    if (save) loadPresetStrategies();
+  } catch (e) {
+    status.innerHTML = `<span class="text-red-500">失败: ${e.message}</span>`;
+  } finally {
+    btn.disabled = false; saveBtn.disabled = false;
+    btnText.textContent = '✨ 生成到下面表单';
+  }
+};
 
 window.addRule = function(side) {
   const rules = side === 'buy' ? builderBuyRules : builderSellRules;

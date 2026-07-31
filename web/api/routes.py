@@ -916,6 +916,49 @@ def builder_indicators():
     return {"indicators": list_indicators()}
 
 
+class BuilderFromAIRequest(BaseModel):
+    prompt: str = Field(..., description="中文自然语言描述你想要的策略")
+    suggested_id: Optional[str] = None
+    suggested_name: Optional[str] = None
+    save: bool = Field(False, description="设为 true 时校验通过直接注册为策略")
+
+
+@router.post("/strategies/builder/from_ai", summary="AI 版条件构建器：中文描述 → 策略 JSON")
+def builder_from_ai(req: BuilderFromAIRequest):
+    """
+    调用 LLM 把用户的中文思路转成条件构建器 spec。
+    - 未配置 LLM：走 stub 返回一个示例，`provider` 字段会标 `stub`
+    - 校验失败：返回 400，附 LLM 原始回复
+    - save=True：校验通过后立即写入 configs/user_strategies/*.yaml 并注册
+    """
+    from ai_analysis.builder_ai import generate_spec
+    from strategies.builder import BuilderStrategy
+    from strategies.registry import registry
+    import yaml as _yaml
+
+    try:
+        result = generate_spec(
+            user_prompt=req.prompt,
+            suggested_id=req.suggested_id,
+            suggested_name=req.suggested_name,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(500, f"AI 生成失败：{e}")
+
+    if req.save:
+        spec = result["spec"]
+        out = Path("configs/user_strategies") / f"{spec['id']}.yaml"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(_yaml.safe_dump(spec, allow_unicode=True, sort_keys=False), encoding="utf-8")
+        registry.register(BuilderStrategy(spec))
+        result["saved_to"] = str(out)
+        result["registered"] = True
+
+    return result
+
+
 class BuilderSaveRequest(BaseModel):
     id: str
     name: str

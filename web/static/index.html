@@ -322,10 +322,34 @@
 
       <!-- 条件构建器 -->
       <div id="lab-builder" class="lab-panel hidden">
-        <div class="p-4 bg-blue-50 border border-blue-100 rounded-lg mb-6 text-sm">
+        <div class="p-4 bg-blue-50 border border-blue-100 rounded-lg mb-4 text-sm">
           <div class="font-semibold text-blue-900 mb-1">🎛️ 什么是条件构建器？</div>
           <div class="text-blue-800">选一些技术指标条件（如 5日线上穿20日线 + MACD 金叉），配置成买入条件、卖出条件，保存为你自己的策略。之后可以在"策略回测"里选它跑。</div>
         </div>
+
+        <!-- AI 对话生成 -->
+        <div class="p-4 bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-200 rounded-lg mb-6">
+          <div class="flex items-center gap-2 mb-2">
+            <span class="text-lg">🤖</span>
+            <span class="font-semibold text-purple-900 text-sm">AI 助手：用一句话描述你要的策略</span>
+            <span id="ai-provider-badge" class="ml-auto text-[11px] px-2 py-0.5 rounded bg-white text-slate-500 border border-slate-200">检测中…</span>
+          </div>
+          <div class="text-xs text-purple-800 mb-3">
+            例子：<span class="italic">"5 日线金叉 20 日线且当日放量 2 倍以上就买，跌破 20 日线就卖"</span>；
+            <span class="italic">"MACD 金叉 + KDJ 超卖买入，RSI 超买或者跌破 5 日线卖"</span>
+          </div>
+          <textarea id="ai-prompt" rows="3" class="field text-sm mb-2"
+            placeholder="用中文描述买入/卖出的条件，AI 会自动把它转成规则填到下面的表单里。"></textarea>
+          <div class="flex flex-wrap items-center gap-2">
+            <button onclick="runAiGenerate(false)" id="ai-gen-btn" class="btn btn-primary">
+              <span id="ai-gen-btn-text">✨ 生成到下面表单</span>
+            </button>
+            <button onclick="runAiGenerate(true)" id="ai-save-btn" class="btn btn-ghost">💾 生成并直接保存为策略</button>
+            <span id="ai-gen-status" class="text-sm text-slate-500 ml-2"></span>
+          </div>
+          <div id="ai-notes" class="hidden mt-3 p-3 bg-white/70 rounded text-xs text-slate-700 border border-slate-200"></div>
+        </div>
+
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
           <div><div class="label">策略 ID（英文/数字）</div><input id="builder-id" type="text" placeholder="my_ma_macd" class="field"></div>
           <div><div class="label">策略名称（显示用）</div><input id="builder-name" type="text" placeholder="我的均线+MACD" class="field"></div>
