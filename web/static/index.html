@@ -141,7 +141,8 @@
               <span class="tip">沪深 300 大盘蓝筹；中证 500 中盘；1000 小盘。<b>全 A</b> = 沪深北全部可交易股，配合下面的过滤面板使用。首次建议沪深 300。</span>
             </span>
           </div>
-          <select id="screen-pool" class="field" onchange="onScreenPoolChange()">
+          <select id="screen-pool" class="field"
+            onchange="(function(){var p=document.getElementById('all-a-filters');if(p)p.classList.toggle('hidden', this.value!=='all');}).call(this)">
             <option value="000300">沪深 300（大盘蓝筹）</option>
             <option value="000905">中证 500（中盘）</option>
             <option value="000852">中证 1000（小盘）</option>
@@ -712,6 +713,9 @@
   </div>
 </div>
 
-<script src="/static/app.js"></script>
+<script>
+  // 用启动时刻作为 cache-buster，任何刷新都会强制拉新 app.js
+  document.write('<script src="/static/app.js?v=' + Date.now() + '"><\/script>');
+</script>
 </body>
 </html>

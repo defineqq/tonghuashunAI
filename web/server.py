@@ -54,10 +54,11 @@ def _load_dotenv():
 _load_dotenv()
 
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from web.api import routes
 
@@ -86,7 +87,20 @@ app.add_middleware(
 
 app.include_router(routes.router, prefix="/api")
 
-# 静态资源
+
+# 静态资源禁用缓存：开发+运维场景下，改完代码不用手动清浏览器缓存
+class NoCacheStaticMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        resp: Response = await call_next(request)
+        if request.url.path.startswith("/static") or request.url.path == "/":
+            resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            resp.headers["Pragma"] = "no-cache"
+            resp.headers["Expires"] = "0"
+        return resp
+
+
+app.add_middleware(NoCacheStaticMiddleware)
+
 STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
