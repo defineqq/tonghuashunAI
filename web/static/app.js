@@ -26,8 +26,45 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.classList.remove('text-slate-500');
     document.getElementById(`tab-${btn.dataset.tab}`).classList.remove('hidden');
     if (btn.dataset.tab === 'settings') loadSettings();
+    if (btn.dataset.tab === 'strategies') loadStrategiesLab();
+    if (btn.dataset.tab === 'backtest') loadBacktestStrategies();
   });
 });
+
+// Lab sub-tabs
+document.querySelectorAll('.lab-subtab').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.lab-subtab').forEach(b => {
+      b.classList.remove('active', 'border-blue-500', 'text-blue-600', 'font-medium');
+      b.classList.add('border-transparent', 'text-slate-500');
+    });
+    btn.classList.add('active', 'border-blue-500', 'text-blue-600', 'font-medium');
+    btn.classList.remove('border-transparent', 'text-slate-500');
+    document.querySelectorAll('.lab-panel').forEach(p => p.classList.add('hidden'));
+    document.getElementById(`lab-${btn.dataset.subtab}`).classList.remove('hidden');
+    if (btn.dataset.subtab === 'builder') loadIndicators();
+    if (btn.dataset.subtab === 'python') loadPythonList();
+  });
+});
+
+// Backtest strategy type toggle
+document.querySelectorAll('.bt-type').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.bt-type').forEach(b => {
+      b.classList.remove('active', 'border-blue-500', 'bg-blue-50', 'text-blue-700');
+      b.classList.add('border-slate-200', 'text-slate-700');
+    });
+    btn.classList.add('active', 'border-blue-500', 'bg-blue-50', 'text-blue-700');
+    btn.classList.remove('border-slate-200', 'text-slate-700');
+    const type = btn.dataset.type;
+    window.btStrategyType = type;
+    document.getElementById('bt-desc-score').classList.toggle('hidden', type !== 'score');
+    document.getElementById('bt-params-score').classList.toggle('hidden', type !== 'score');
+    document.getElementById('bt-desc-technical').classList.toggle('hidden', type !== 'technical');
+    document.getElementById('bt-params-technical').classList.toggle('hidden', type !== 'technical');
+  });
+});
+window.btStrategyType = 'score';
 
 // -------- Status --------
 async function refreshStatus() {
@@ -103,9 +140,10 @@ window.toggleHealthPanel = function() {
   toggle.textContent = detail.classList.contains('hidden') ? '▼' : '▲';
 };
 
-// -------- 预设 --------
+// -------- 预设 + 自定义权重 --------
 let presets = [];
 let selectedPreset = 'balanced';
+let customWeights = null;  // {technical, fundamental, sentiment, moneyflow}
 
 async function loadPresets() {
   try {
@@ -120,23 +158,118 @@ async function loadPresets() {
 
 function renderPresetCards() {
   const emojiMap = { balanced: '⚖️', momentum: '🚀', value: '💎', growth: '🌱', dividend: '💰' };
-  const html = presets.map(p => `
+  const cardHtml = presets.map(p => {
+    const active = p.key === selectedPreset && selectedPreset !== 'custom';
+    return `
+      <button
+        onclick="selectPreset('${p.key}')"
+        class="p-4 rounded-lg border-2 transition-all text-left ${active ? 'border-blue-500 bg-blue-50' : 'border-slate-200 bg-white hover:border-slate-300'}"
+      >
+        <div class="text-2xl mb-1">${emojiMap[p.key] || '📊'}</div>
+        <div class="font-semibold text-sm">${p.name}</div>
+        <div class="text-xs text-slate-500 mt-1 leading-relaxed">${p.desc}</div>
+      </button>
+    `;
+  }).join('') + `
     <button
-      data-preset="${p.key}"
-      onclick="selectPreset('${p.key}')"
-      class="preset-card p-4 rounded-lg border-2 transition-all text-left ${p.key === selectedPreset ? 'border-blue-500 bg-blue-50' : 'border-slate-200 bg-white hover:border-slate-300'}"
+      onclick="openCustomWeight()"
+      class="p-4 rounded-lg border-2 transition-all text-left ${selectedPreset === 'custom' ? 'border-blue-500 bg-blue-50' : 'border-dashed border-slate-300 hover:border-blue-400 bg-slate-50'}"
     >
-      <div class="text-2xl mb-1">${emojiMap[p.key] || '📊'}</div>
-      <div class="font-semibold text-sm">${p.name}</div>
-      <div class="text-xs text-slate-500 mt-1 leading-relaxed">${p.desc}</div>
+      <div class="text-2xl mb-1">🎛️</div>
+      <div class="font-semibold text-sm">自定义</div>
+      <div class="text-xs text-slate-500 mt-1 leading-relaxed">自己拉滑块设权重</div>
     </button>
-  `).join('');
-  document.getElementById('preset-cards').innerHTML = html;
+  `;
+  document.getElementById('preset-cards').innerHTML = cardHtml;
+
+  // 显示当前使用的权重
+  const currentEl = document.getElementById('preset-current');
+  if (currentEl) {
+    let w;
+    if (selectedPreset === 'custom' && customWeights) {
+      w = customWeights;
+      currentEl.innerHTML = `当前权重（自定义）: 技术 <b>${(w.technical*100).toFixed(0)}%</b> · 基本 <b>${(w.fundamental*100).toFixed(0)}%</b> · 情绪 <b>${(w.sentiment*100).toFixed(0)}%</b> · 资金 <b>${(w.moneyflow*100).toFixed(0)}%</b>`;
+    } else {
+      const p = presets.find(x => x.key === selectedPreset);
+      if (p) {
+        w = p.weights;
+        currentEl.innerHTML = `当前权重: 技术 <b>${(w.technical*100).toFixed(0)}%</b> · 基本 <b>${(w.fundamental*100).toFixed(0)}%</b> · 情绪 <b>${(w.sentiment*100).toFixed(0)}%</b> · 资金 <b>${(w.moneyflow*100).toFixed(0)}%</b>`;
+      }
+    }
+  }
 }
 
 window.selectPreset = function(key) {
   selectedPreset = key;
   renderPresetCards();
+};
+
+// 自定义权重弹窗
+window.openCustomWeight = function() {
+  document.getElementById('custom-weight-modal').classList.remove('hidden');
+  // 初始化滑块（若已有自定义值则用之）
+  const w = customWeights || { technical: 0.35, fundamental: 0.20, sentiment: 0.20, moneyflow: 0.25 };
+  const map = { tech: 'technical', fund: 'fundamental', sent: 'sentiment', money: 'moneyflow' };
+  Object.entries(map).forEach(([k, v]) => {
+    const raw = Math.round((w[v] || 0) * 100);
+    document.getElementById(`cw-${k}`).value = raw;
+    document.getElementById(`cw-${k}-val`).textContent = raw;
+  });
+  updateCwTotal();
+};
+
+window.closeCustomWeight = function() {
+  document.getElementById('custom-weight-modal').classList.add('hidden');
+};
+
+['tech','fund','sent','money'].forEach(k => {
+  document.getElementById(`cw-${k}`).addEventListener('input', (e) => {
+    document.getElementById(`cw-${k}-val`).textContent = e.target.value;
+    updateCwTotal();
+  });
+});
+
+function updateCwTotal() {
+  const t = parseFloat(document.getElementById('cw-tech').value) || 0;
+  const f = parseFloat(document.getElementById('cw-fund').value) || 0;
+  const s = parseFloat(document.getElementById('cw-sent').value) || 0;
+  const m = parseFloat(document.getElementById('cw-money').value) || 0;
+  const sum = t + f + s + m;
+  const totalEl = document.getElementById('cw-total');
+  if (sum === 0) {
+    totalEl.textContent = '0%（无效）';
+    totalEl.className = 'font-semibold text-red-500';
+  } else {
+    totalEl.textContent = `${(t/sum*100).toFixed(0)}% + ${(f/sum*100).toFixed(0)}% + ${(s/sum*100).toFixed(0)}% + ${(m/sum*100).toFixed(0)}% = 100%`;
+    totalEl.className = 'font-semibold text-emerald-600';
+  }
+}
+
+window.applyCustomWeight = function() {
+  const t = parseFloat(document.getElementById('cw-tech').value) || 0;
+  const f = parseFloat(document.getElementById('cw-fund').value) || 0;
+  const s = parseFloat(document.getElementById('cw-sent').value) || 0;
+  const m = parseFloat(document.getElementById('cw-money').value) || 0;
+  const sum = t + f + s + m;
+  if (sum === 0) { alert('至少一个维度权重要大于 0'); return; }
+  customWeights = {
+    technical: t / sum,
+    fundamental: f / sum,
+    sentiment: s / sum,
+    moneyflow: m / sum,
+  };
+  selectedPreset = 'custom';
+  closeCustomWeight();
+  renderPresetCards();
+};
+
+// 预设说明弹窗
+window.showPresetHelp = function(e) {
+  if (e) e.preventDefault();
+  document.getElementById('preset-help-modal').classList.remove('hidden');
+};
+window.closePresetHelp = function() {
+  document.getElementById('preset-help-modal').classList.add('hidden');
 };
 
 loadPresets();
@@ -155,11 +288,15 @@ async function runScreen() {
     const body = {
       pool: document.getElementById('screen-pool').value,
       pool_limit: parseInt(document.getElementById('screen-pool-limit').value),
-      preset: selectedPreset,
+      preset: selectedPreset === 'custom' ? 'balanced' : selectedPreset,
       min_score: parseFloat(document.getElementById('screen-min-score').value) || 0,
       top_n: parseInt(document.getElementById('screen-top-n').value) || 10,
       use_llm: document.getElementById('screen-llm').checked,
     };
+    // 自定义权重（后端需支持）
+    if (selectedPreset === 'custom' && customWeights) {
+      body.custom_weights = customWeights;
+    }
     const r = await API('/screen', { method: 'POST', body: JSON.stringify(body) });
     status.innerHTML = `已从 <b>${r.pool_size}</b> 只中筛选出综合分 ≥ ${body.min_score} 的 <b>${r.matched}</b> 只，展示前 <b>${r.results.length}</b> 只 · 风格 <b>${r.preset_name}</b>`;
 
@@ -493,7 +630,6 @@ async function runBacktest() {
   const start = document.getElementById('bt-start').value;
   const end = document.getElementById('bt-end').value;
   const pool = document.getElementById('bt-pool').value;
-  const preset = document.getElementById('bt-preset').value;
   const limit = parseInt(document.getElementById('bt-limit').value) || 20;
   const minScore = parseFloat(document.getElementById('bt-min-score').value) || 0;
   if (!start || !end) return alert('请选择起止日期');
@@ -501,24 +637,48 @@ async function runBacktest() {
   const status = document.getElementById('bt-status');
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span> 回测中...';
-  status.innerHTML = `<span class="spinner"></span> 正在逐日模拟撮合... 池大小 ${limit}，风格 ${preset}，可能需要几十秒到几分钟`;
-  try {
-    const r = await API('/backtest/run', {
-      method: 'POST',
-      body: JSON.stringify({ start, end, pool, preset, limit, min_score: minScore, initial_cash: 100000 }),
+
+  // 组装 body
+  const body = { start, end, pool, limit, initial_cash: 100000, min_score: minScore };
+  if (window.btStrategyType === 'technical') {
+    const id = document.getElementById('bt-strategy-id').value;
+    if (!id) { alert('请选择技术策略'); btn.disabled = false; btn.textContent = '开始回测'; return; }
+    const params = {};
+    document.querySelectorAll('#bt-strategy-params [data-param]').forEach(inp => {
+      params[inp.dataset.param] = parseFloat(inp.value);
     });
+    body.strategy_type = 'technical';
+    body.strategy_id = id;
+    body.strategy_params = params;
+    status.innerHTML = `<span class="spinner"></span> 正在逐日模拟撮合... 技术策略 <b>${id}</b>`;
+  } else {
+    body.strategy_type = 'score';
+    body.preset = document.getElementById('bt-preset').value;
+    status.innerHTML = `<span class="spinner"></span> 正在逐日模拟撮合... 打分策略 · 风格 ${body.preset}`;
+  }
+
+  try {
+    const r = await API('/backtest/run', { method: 'POST', body: JSON.stringify(body) });
     status.textContent = `完成 · 成交 ${r.trades_count} 笔`;
     document.getElementById('bt-result').classList.remove('hidden');
 
     // 元信息
-    const w = r.weights;
-    document.getElementById('bt-meta').innerHTML = `
-      策略：<b>swing_v1</b> · 风格：<b>${r.preset_name}</b>
-      <span class="text-slate-400">
-        (技术 ${(w.technical*100).toFixed(0)}% · 基本 ${(w.fundamental*100).toFixed(0)}%
-        · 情绪 ${(w.sentiment*100).toFixed(0)}% · 资金 ${(w.moneyflow*100).toFixed(0)}%)
-      </span>
-    `;
+    if (r.strategy_type === 'technical') {
+      const paramStr = Object.entries(r.params || {}).map(([k, v]) => `${k}=${v}`).join(' ');
+      document.getElementById('bt-meta').innerHTML = `
+        策略类型：<b>技术指标</b> · 策略：<b>${r.strategy_id}</b>
+        <span class="text-slate-400">${paramStr}</span>
+      `;
+    } else {
+      const w = r.weights || {};
+      document.getElementById('bt-meta').innerHTML = `
+        策略：<b>swing_v1</b> · 风格：<b>${r.preset_name}</b>
+        <span class="text-slate-400">
+          (技术 ${(w.technical*100).toFixed(0)}% · 基本 ${(w.fundamental*100).toFixed(0)}%
+          · 情绪 ${(w.sentiment*100).toFixed(0)}% · 资金 ${(w.moneyflow*100).toFixed(0)}%)
+        </span>
+      `;
+    }
 
     const m = r.metrics;
     const cards = [
@@ -669,6 +829,274 @@ async function testNotify() {
   }
 }
 window.testNotify = testNotify;
+
+// -------- 策略实验室 --------
+let allStrategies = [];
+let indicators = [];
+let builderBuyRules = [];
+let builderSellRules = [];
+
+async function loadStrategiesLab() {
+  await loadPresetStrategies();
+}
+
+async function loadPresetStrategies() {
+  try {
+    const r = await API('/strategies');
+    allStrategies = r.strategies;
+    const preset = r.strategies.filter(s => s.kind === 'preset');
+    const builder = r.strategies.filter(s => s.kind === 'builder');
+    const python = r.strategies.filter(s => s.kind === 'python');
+    const list = document.getElementById('preset-strategy-list');
+    list.innerHTML = preset.map(s => `
+      <div class="border border-slate-200 rounded-lg p-4 hover:shadow-md transition-shadow">
+        <div class="flex items-start justify-between mb-2">
+          <div>
+            <div class="font-semibold">${s.name}</div>
+            <div class="text-xs text-slate-400 mt-0.5">${s.category} · ${s.tags.join(' · ')}</div>
+          </div>
+        </div>
+        <div class="text-sm text-slate-600 leading-relaxed">${s.description}</div>
+        <details class="mt-2 text-xs">
+          <summary class="cursor-pointer text-blue-500">参数</summary>
+          <div class="mt-2 space-y-1">
+            ${s.params.map(p => `<div class="flex justify-between"><span>${p.label}</span><span class="text-slate-400">默认 ${p.default}</span></div>`).join('')}
+          </div>
+        </details>
+      </div>
+    `).join('');
+    // 若有 builder 或 python 策略，也追加显示
+    if (builder.length || python.length) {
+      list.innerHTML += `<div class="col-span-full mt-4 text-sm font-semibold text-slate-700">你创建的策略</div>` + [...builder, ...python].map(s => `
+        <div class="border border-blue-200 bg-blue-50 rounded-lg p-4">
+          <div class="flex items-start justify-between mb-2">
+            <div>
+              <div class="font-semibold">${s.name}</div>
+              <div class="text-xs text-slate-400 mt-0.5">${s.kind === 'builder' ? '🎛️ 条件构建' : '🐍 Python'} · ${s.tags.join(' · ')}</div>
+            </div>
+          </div>
+          <div class="text-sm text-slate-600">${s.description}</div>
+        </div>
+      `).join('');
+    }
+  } catch (e) {
+    document.getElementById('preset-strategy-list').innerHTML = `<div class="text-red-500">加载失败: ${e.message}</div>`;
+  }
+}
+
+async function loadIndicators() {
+  if (indicators.length) return;
+  try {
+    const r = await API('/strategies/builder/indicators');
+    indicators = r.indicators;
+    if (builderBuyRules.length === 0) addRule('buy');
+    if (builderSellRules.length === 0) addRule('sell');
+  } catch (e) {
+    document.getElementById('buy-rules').innerHTML = `<div class="text-red-500 text-xs">加载指标失败: ${e.message}</div>`;
+  }
+}
+
+window.addRule = function(side) {
+  const rules = side === 'buy' ? builderBuyRules : builderSellRules;
+  rules.push({ indicator: 'MA', op: 'cross_up', params: {}, value: null });
+  renderRules(side);
+};
+
+window.removeRule = function(side, idx) {
+  const rules = side === 'buy' ? builderBuyRules : builderSellRules;
+  rules.splice(idx, 1);
+  renderRules(side);
+};
+
+window.changeRuleIndicator = function(side, idx, ind) {
+  const rules = side === 'buy' ? builderBuyRules : builderSellRules;
+  rules[idx].indicator = ind;
+  const indDef = indicators.find(i => i.key === ind);
+  if (indDef) {
+    rules[idx].op = indDef.ops[0].name;
+    rules[idx].params = {};
+    indDef.params.forEach(p => { rules[idx].params[p.name] = p.default; });
+    const opDef = indDef.ops[0];
+    if (opDef.value_type === 'number') rules[idx].value = opDef.value_default;
+    else rules[idx].value = null;
+  }
+  renderRules(side);
+};
+
+window.changeRuleOp = function(side, idx, op) {
+  const rules = side === 'buy' ? builderBuyRules : builderSellRules;
+  rules[idx].op = op;
+  const indDef = indicators.find(i => i.key === rules[idx].indicator);
+  const opDef = indDef?.ops.find(o => o.name === op);
+  if (opDef && opDef.value_type === 'number') {
+    rules[idx].value = opDef.value_default;
+  } else {
+    rules[idx].value = null;
+  }
+  renderRules(side);
+};
+
+window.changeRuleValue = function(side, idx, value) {
+  const rules = side === 'buy' ? builderBuyRules : builderSellRules;
+  rules[idx].value = parseFloat(value);
+};
+
+window.changeRuleParam = function(side, idx, paramName, value) {
+  const rules = side === 'buy' ? builderBuyRules : builderSellRules;
+  rules[idx].params[paramName] = parseFloat(value);
+};
+
+function renderRules(side) {
+  const rules = side === 'buy' ? builderBuyRules : builderSellRules;
+  const container = document.getElementById(`${side}-rules`);
+  container.innerHTML = rules.map((r, idx) => {
+    const indDef = indicators.find(i => i.key === r.indicator);
+    const opDef = indDef?.ops.find(o => o.name === r.op);
+    const paramInputs = (indDef?.params || []).map(p => `
+      <input type="number" class="field text-xs w-16 py-1" value="${r.params[p.name] ?? p.default}"
+        onchange="changeRuleParam('${side}',${idx},'${p.name}',this.value)"
+        title="${p.label}">
+    `).join('');
+    const valueInput = opDef?.value_type === 'number' ? `
+      <input type="number" class="field text-xs w-16 py-1" value="${r.value ?? opDef.value_default}"
+        step="0.1" onchange="changeRuleValue('${side}',${idx},this.value)">
+    ` : '';
+    return `
+      <div class="flex items-center gap-2 p-2 bg-slate-50 rounded">
+        <select class="field text-xs py-1 w-32" onchange="changeRuleIndicator('${side}',${idx},this.value)">
+          ${indicators.map(i => `<option value="${i.key}" ${i.key === r.indicator ? 'selected' : ''}>${i.label}</option>`).join('')}
+        </select>
+        ${paramInputs}
+        <select class="field text-xs py-1 flex-1" onchange="changeRuleOp('${side}',${idx},this.value)">
+          ${(indDef?.ops || []).map(o => `<option value="${o.name}" ${o.name === r.op ? 'selected' : ''}>${o.label}</option>`).join('')}
+        </select>
+        ${valueInput}
+        <button onclick="removeRule('${side}',${idx})" class="text-red-500 text-xs">✕</button>
+      </div>
+    `;
+  }).join('') || '<div class="text-xs text-slate-400">还没有规则，点下面的按钮添加</div>';
+}
+
+window.saveBuilder = async function() {
+  const id = document.getElementById('builder-id').value.trim();
+  const name = document.getElementById('builder-name').value.trim();
+  if (!id || !name) return alert('请填写策略 ID 和名称');
+  if (!/^[a-zA-Z0-9_]+$/.test(id)) return alert('策略 ID 只能包含字母、数字、下划线');
+  const buyLogic = document.querySelector('input[name="buy-logic"]:checked').value;
+  const sellLogic = document.querySelector('input[name="sell-logic"]:checked').value;
+  const btn = document.getElementById('save-builder-btn');
+  const status = document.getElementById('builder-status');
+  btn.disabled = true; status.textContent = '保存中...';
+  try {
+    const r = await API('/strategies/builder', {
+      method: 'POST', body: JSON.stringify({
+        id, name, description: `买入: ${buyLogic} of ${builderBuyRules.length} 规则`,
+        buy: { logic: buyLogic, rules: builderBuyRules },
+        sell: { logic: sellLogic, rules: builderSellRules },
+      }),
+    });
+    status.innerHTML = `<span class="text-emerald-600">✓ 已保存为 ${r.id}，可以在回测中选择</span>`;
+    loadPresetStrategies();
+  } catch (e) {
+    status.innerHTML = `<span class="text-red-500">失败: ${e.message}</span>`;
+  } finally { btn.disabled = false; }
+};
+
+// Python 编辑器
+async function loadPythonList() {
+  try {
+    const r = await API('/strategies/python/list');
+    const list = document.getElementById('py-list');
+    list.innerHTML = r.files.length ? r.files.map(f => `
+      <li><a href="#" onclick="loadPythonFile('${f.filename}');return false" class="text-blue-500 hover:underline">${f.filename}</a></li>
+    `).join('') : '<li class="text-slate-400 text-xs">暂无</li>';
+  } catch (e) {}
+}
+
+window.loadPythonFile = async function(filename) {
+  try {
+    const r = await API(`/strategies/python/${filename}`);
+    document.getElementById('py-filename').value = filename;
+    document.getElementById('py-source').value = r.source;
+  } catch (e) { alert('加载失败: ' + e.message); }
+};
+
+window.newPythonFile = async function() {
+  try {
+    const r = await API('/strategies/python/template');
+    document.getElementById('py-filename').value = 'my_strategy.py';
+    document.getElementById('py-source').value = r.template;
+    document.getElementById('py-status').textContent = '';
+  } catch (e) { alert('加载模板失败: ' + e.message); }
+};
+
+window.savePython = async function() {
+  const filename = document.getElementById('py-filename').value.trim();
+  const source = document.getElementById('py-source').value;
+  if (!filename) return alert('请填文件名');
+  const status = document.getElementById('py-status');
+  status.textContent = '保存中...';
+  try {
+    const r = await API('/strategies/python', { method: 'POST', body: JSON.stringify({ filename, source }) });
+    status.innerHTML = `<span class="text-emerald-600">✓ 已保存${r.strategy_id ? '并注册为 ' + r.strategy_id : ''}</span>`;
+    loadPythonList();
+    loadPresetStrategies();
+  } catch (e) {
+    status.innerHTML = `<span class="text-red-500">失败: ${e.message}</span>`;
+  }
+};
+
+window.deletePython = async function() {
+  const filename = document.getElementById('py-filename').value.trim();
+  if (!filename) return;
+  if (!confirm('确定删除 ' + filename + ' ？')) return;
+  try {
+    await API(`/strategies/python/${filename}`, { method: 'DELETE' });
+    document.getElementById('py-filename').value = '';
+    document.getElementById('py-source').value = '';
+    loadPythonList();
+    loadPresetStrategies();
+  } catch (e) { alert('失败: ' + e.message); }
+};
+
+// -------- 回测：策略选择 --------
+async function loadBacktestStrategies() {
+  if (allStrategies.length === 0) {
+    try {
+      const r = await API('/strategies');
+      allStrategies = r.strategies;
+    } catch (e) { return; }
+  }
+  const sel = document.getElementById('bt-strategy-id');
+  const optgroups = {};
+  allStrategies.forEach(s => {
+    if (!optgroups[s.kind]) optgroups[s.kind] = [];
+    optgroups[s.kind].push(s);
+  });
+  const kindLabel = { preset: '📦 预置策略', builder: '🎛️ 条件构建', python: '🐍 Python' };
+  sel.innerHTML = Object.entries(optgroups).map(([kind, list]) => `
+    <optgroup label="${kindLabel[kind] || kind}">
+      ${list.map(s => `<option value="${s.id}">${s.name} (${s.category})</option>`).join('')}
+    </optgroup>
+  `).join('');
+  onBacktestStrategyChange();
+}
+
+window.onBacktestStrategyChange = function() {
+  const id = document.getElementById('bt-strategy-id').value;
+  const s = allStrategies.find(x => x.id === id);
+  if (!s) return;
+  document.getElementById('bt-strategy-desc').innerHTML = s.description;
+  const paramsEl = document.getElementById('bt-strategy-params');
+  paramsEl.innerHTML = s.params.map(p => `
+    <div>
+      <div class="label text-xs">${p.label} ${p.help ? `<span title="${p.help}" class="text-slate-400">ⓘ</span>` : ''}</div>
+      <input data-param="${p.name}" type="number" value="${p.default}" step="${p.step || 1}"
+        ${p.min !== null ? `min="${p.min}"` : ''} ${p.max !== null ? `max="${p.max}"` : ''}
+        class="field text-sm">
+    </div>
+  `).join('');
+};
 
 // -------- 初始化 --------
 // 默认日期填过去半年

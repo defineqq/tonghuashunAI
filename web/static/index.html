@@ -84,6 +84,7 @@
     <button class="tab-btn active py-3 text-slate-700 font-medium" data-tab="home">🔍 智能选股</button>
     <button class="tab-btn py-3 text-slate-500" data-tab="detail">🎯 个股分析</button>
     <button class="tab-btn py-3 text-slate-500" data-tab="portfolio">💼 我的账户</button>
+    <button class="tab-btn py-3 text-slate-500" data-tab="strategies">🧪 策略实验室</button>
     <button class="tab-btn py-3 text-slate-500" data-tab="backtest">📊 策略回测</button>
     <button class="tab-btn py-3 text-slate-500" data-tab="learn">📚 使用指南</button>
     <button class="tab-btn py-3 text-slate-500" data-tab="settings">⚙️ 设置</button>
@@ -117,10 +118,14 @@
       <p class="text-sm text-slate-500 mb-6">选一个"选股风格"，一键从沪深 300/500 里筛出综合评分最高的股票。全程无需手动填参数。</p>
 
       <!-- 风格卡片 -->
-      <div class="label">1. 选择选股风格</div>
-      <div id="preset-cards" class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+      <div class="label flex items-center justify-between">
+        <span>1. 选择选股风格</span>
+        <a href="#" onclick="showPresetHelp(event)" class="text-xs text-blue-500 hover:underline">查看各风格权重说明</a>
+      </div>
+      <div id="preset-cards" class="grid grid-cols-2 md:grid-cols-6 gap-3 mb-2">
         <!-- JS 填充 -->
       </div>
+      <div id="preset-current" class="mb-6 text-xs text-slate-500"></div>
 
       <!-- 简单配置 -->
       <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
@@ -248,40 +253,149 @@
     </div>
   </section>
 
+  <!-- ============ 策略实验室 ============ -->
+  <section id="tab-strategies" class="tab-panel hidden space-y-6">
+    <div class="card p-6">
+      <h2 class="text-xl font-semibold mb-1">🧪 策略实验室</h2>
+      <p class="text-sm text-slate-500 mb-4">浏览预置策略、创建自定义策略。所有策略都可在"策略回测"里跑历史验证。</p>
+
+      <div class="flex gap-4 border-b border-slate-200 mb-4">
+        <button class="lab-subtab active py-2 px-1 border-b-2 border-blue-500 text-blue-600 text-sm font-medium" data-subtab="preset">📦 预置策略库</button>
+        <button class="lab-subtab py-2 px-1 border-b-2 border-transparent text-slate-500 text-sm" data-subtab="builder">🎛️ 条件构建器</button>
+        <button class="lab-subtab py-2 px-1 border-b-2 border-transparent text-slate-500 text-sm" data-subtab="python">🐍 Python 代码</button>
+      </div>
+
+      <!-- 预置策略库 -->
+      <div id="lab-preset" class="lab-panel">
+        <div id="preset-strategy-list" class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div class="text-slate-400 text-sm">加载中...</div>
+        </div>
+      </div>
+
+      <!-- 条件构建器 -->
+      <div id="lab-builder" class="lab-panel hidden">
+        <div class="p-4 bg-blue-50 border border-blue-100 rounded-lg mb-6 text-sm">
+          <div class="font-semibold text-blue-900 mb-1">🎛️ 什么是条件构建器？</div>
+          <div class="text-blue-800">选一些技术指标条件（如 5日线上穿20日线 + MACD 金叉），配置成买入条件、卖出条件，保存为你自己的策略。之后可以在"策略回测"里选它跑。</div>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+          <div><div class="label">策略 ID（英文/数字）</div><input id="builder-id" type="text" placeholder="my_ma_macd" class="field"></div>
+          <div><div class="label">策略名称（显示用）</div><input id="builder-name" type="text" placeholder="我的均线+MACD" class="field"></div>
+        </div>
+
+        <div class="mt-4">
+          <div class="font-semibold text-sm mb-2 text-slate-700">📈 买入条件</div>
+          <div class="mb-2">
+            <label class="text-xs mr-3">规则关系:</label>
+            <label class="mr-3 text-xs"><input type="radio" name="buy-logic" value="AND" checked> 全部满足 (AND)</label>
+            <label class="text-xs"><input type="radio" name="buy-logic" value="OR"> 任一满足 (OR)</label>
+          </div>
+          <div id="buy-rules" class="space-y-2"></div>
+          <button onclick="addRule('buy')" class="mt-2 text-xs px-2 py-1 bg-slate-100 rounded hover:bg-slate-200">+ 添加规则</button>
+        </div>
+
+        <div class="mt-6">
+          <div class="font-semibold text-sm mb-2 text-slate-700">📉 卖出条件</div>
+          <div class="mb-2">
+            <label class="text-xs mr-3">规则关系:</label>
+            <label class="mr-3 text-xs"><input type="radio" name="sell-logic" value="AND"> 全部满足 (AND)</label>
+            <label class="text-xs"><input type="radio" name="sell-logic" value="OR" checked> 任一满足 (OR)</label>
+          </div>
+          <div id="sell-rules" class="space-y-2"></div>
+          <button onclick="addRule('sell')" class="mt-2 text-xs px-2 py-1 bg-slate-100 rounded hover:bg-slate-200">+ 添加规则</button>
+        </div>
+
+        <div class="mt-6 flex items-center gap-2">
+          <button onclick="saveBuilder()" id="save-builder-btn" class="btn btn-primary">保存策略</button>
+          <span id="builder-status" class="text-sm text-slate-500"></span>
+        </div>
+      </div>
+
+      <!-- Python 代码 -->
+      <div id="lab-python" class="lab-panel hidden">
+        <div class="p-4 bg-amber-50 border border-amber-200 rounded-lg mb-4 text-sm">
+          <div class="font-semibold text-amber-900 mb-1">⚠️ Python 策略（高级用户）</div>
+          <div class="text-amber-800">直接写 Python 代码定义策略。需要基本的 pandas 知识。**代码会在你的服务器上直接执行**，请确保只保存你自己写的代码。</div>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div class="md:col-span-1">
+            <div class="text-sm font-semibold mb-2">已保存</div>
+            <ul id="py-list" class="text-sm space-y-1"></ul>
+            <button onclick="newPythonFile()" class="mt-3 btn btn-ghost text-xs w-full">+ 新建</button>
+          </div>
+          <div class="md:col-span-3">
+            <div class="flex gap-2 mb-2">
+              <input id="py-filename" type="text" placeholder="my_strategy.py" class="field flex-1">
+              <button onclick="savePython()" class="btn btn-primary">保存</button>
+              <button onclick="deletePython()" class="btn btn-ghost text-red-500">删除</button>
+            </div>
+            <textarea id="py-source" class="field font-mono text-xs" style="min-height: 400px; resize: vertical"></textarea>
+            <div id="py-status" class="text-sm mt-2"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- ============ 回测 ============ -->
   <section id="tab-backtest" class="tab-panel hidden space-y-6">
     <div class="card p-6">
       <h2 class="text-xl font-semibold mb-1">📊 策略回测</h2>
       <p class="text-sm text-slate-500 mb-4">用历史数据验证策略：假设从"开始日期"起，按选定风格持续跑，最终收益会是多少。</p>
 
-      <!-- 策略说明 -->
-      <div class="p-4 bg-blue-50 border border-blue-100 rounded-lg mb-6">
-        <div class="font-semibold text-sm text-blue-900 mb-1">📋 当前回测策略：<span class="font-mono">swing_v1</span>（日级波段）</div>
+      <!-- 策略类型选择 -->
+      <div class="mb-4 flex gap-2">
+        <button class="bt-type active px-3 py-2 rounded-lg border-2 border-blue-500 bg-blue-50 text-blue-700 text-sm" data-type="score">📊 打分策略</button>
+        <button class="bt-type px-3 py-2 rounded-lg border-2 border-slate-200 text-slate-700 text-sm" data-type="technical">🧪 技术指标策略</button>
+      </div>
+
+      <!-- 打分策略说明 -->
+      <div id="bt-desc-score" class="p-4 bg-blue-50 border border-blue-100 rounded-lg mb-6">
+        <div class="font-semibold text-sm text-blue-900 mb-1">📋 打分策略（swing_v1 · 日级波段）</div>
         <div class="text-xs text-blue-800 leading-relaxed">
-          <b>选股</b>：每天从股票池里按下面选的"风格"打四维分，综合分 ≥ 分数下限的进入候选，取前 5 只买入 <br>
-          <b>持仓</b>：单只 18% 仓位，最多同时持 5 只（可在 ⚙️ 设置里调） <br>
-          <b>卖出</b>：亏 5% 止损 / 赚 15% 止盈减半 / 持有满 10 天到期强平（可在 ⚙️ 设置里调） <br>
-          <b>成本</b>：万分之三佣金 + 千分之一印花税 + 千分之一滑点（真实 A 股水平）
+          每天用<b>四维打分</b>（技术/基本/情绪/资金）从股票池选综合分 ≥ 分数下限的前 5 只买入。<br>
+          单只 18% 仓位；亏 5% 止损 / 赚 15% 止盈减半 / 持有满 10 天到期强平。<br>
+          成本：万三佣金 + 千一印花税 + 千一滑点。
         </div>
       </div>
 
-      <div class="grid grid-cols-2 md:grid-cols-3 gap-3 mb-3">
+      <!-- 技术策略说明 -->
+      <div id="bt-desc-technical" class="hidden p-4 bg-emerald-50 border border-emerald-100 rounded-lg mb-6">
+        <div class="font-semibold text-sm text-emerald-900 mb-1">📋 技术指标策略</div>
+        <div class="text-xs text-emerald-800 leading-relaxed">
+          每天对股票池中的每一只跑<b>选中的技术策略</b>（如 MA 金叉、MACD 金叉、布林带等）。当策略给出"买"信号且没持仓时买入，"卖"信号时清仓。<br>
+          <b>不同于打分策略：</b>技术策略只对单只股票的价格走势判断，不做四维评分和排名。
+        </div>
+      </div>
+
+      <!-- 打分策略参数 -->
+      <div id="bt-params-score" class="grid grid-cols-2 md:grid-cols-3 gap-3 mb-3">
         <div class="md:col-span-3">
           <div class="label flex items-center gap-1">
             选股风格
-            <span class="info relative">
-              <span class="text-slate-400">ⓘ</span>
-              <span class="tip">跟首页的"选股风格"一致。选不同风格 = 跑不同的策略。</span>
-            </span>
+            <a href="#" onclick="showPresetHelp(event)" class="text-xs text-blue-500 ml-auto hover:underline">各风格权重说明</a>
           </div>
           <select id="bt-preset" class="field">
             <option value="balanced">⚖️ 均衡 · 四维等权</option>
-            <option value="momentum">🚀 动量 · 追强势股（短线）</option>
-            <option value="value">💎 价值 · 低估值优先</option>
-            <option value="growth">🌱 成长 · 找业绩爆发</option>
-            <option value="dividend">💰 红利 · 稳定分红（长线）</option>
+            <option value="momentum">🚀 动量 · 追强势股</option>
+            <option value="value">💎 价值 · 低估值</option>
+            <option value="growth">🌱 成长 · 业绩爆发</option>
+            <option value="dividend">💰 红利 · 稳定分红</option>
           </select>
         </div>
+      </div>
+
+      <!-- 技术策略参数 -->
+      <div id="bt-params-technical" class="hidden mb-3">
+        <div class="label">选择技术策略</div>
+        <select id="bt-strategy-id" class="field mb-3" onchange="onBacktestStrategyChange()">
+          <option value="">— 加载中 —</option>
+        </select>
+        <div id="bt-strategy-params" class="grid grid-cols-2 md:grid-cols-4 gap-3"></div>
+        <div id="bt-strategy-desc" class="mt-2 text-xs text-slate-500"></div>
+      </div>
+
+      <div class="grid grid-cols-2 md:grid-cols-3 gap-3 mb-3">
         <div><div class="label">开始日期</div><input id="bt-start" type="date" class="field"></div>
         <div><div class="label">结束日期</div><input id="bt-end" type="date" class="field"></div>
         <div>
@@ -434,6 +548,92 @@
   </section>
 
 </main>
+
+<!-- 自定义权重弹窗 -->
+<div id="custom-weight-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+  <div class="bg-white rounded-xl w-full max-w-md p-6 shadow-2xl">
+    <h3 class="text-lg font-semibold mb-1">🎛️ 自定义打分权重</h3>
+    <p class="text-xs text-slate-500 mb-4">四个维度的权重会自动归一化到合计 100%。想只看某一维就把它调到 100 其他调 0。</p>
+    <div class="space-y-3">
+      <div>
+        <div class="flex justify-between text-sm mb-1">
+          <span>📈 技术面</span><span><span id="cw-tech-val">35</span>%</span>
+        </div>
+        <input id="cw-tech" type="range" min="0" max="100" value="35" class="w-full">
+        <div class="text-xs text-slate-400">均线、动量、RSI、量能</div>
+      </div>
+      <div>
+        <div class="flex justify-between text-sm mb-1">
+          <span>💰 基本面</span><span><span id="cw-fund-val">20</span>%</span>
+        </div>
+        <input id="cw-fund" type="range" min="0" max="100" value="20" class="w-full">
+        <div class="text-xs text-slate-400">估值、ROE、增长</div>
+      </div>
+      <div>
+        <div class="flex justify-between text-sm mb-1">
+          <span>🧠 情绪面</span><span><span id="cw-sent-val">20</span>%</span>
+        </div>
+        <input id="cw-sent" type="range" min="0" max="100" value="20" class="w-full">
+        <div class="text-xs text-slate-400">AI 读公告的评分（需开启 AI）</div>
+      </div>
+      <div>
+        <div class="flex justify-between text-sm mb-1">
+          <span>💵 资金面</span><span><span id="cw-money-val">25</span>%</span>
+        </div>
+        <input id="cw-money" type="range" min="0" max="100" value="25" class="w-full">
+        <div class="text-xs text-slate-400">北向资金、主力净流入、换手</div>
+      </div>
+    </div>
+    <div class="mt-4 p-3 bg-slate-50 rounded text-sm">
+      合计（归一化后）：<span id="cw-total" class="font-semibold">100%</span>
+    </div>
+    <div class="mt-5 flex justify-end gap-2">
+      <button onclick="closeCustomWeight()" class="btn btn-ghost">取消</button>
+      <button onclick="applyCustomWeight()" class="btn btn-primary">应用</button>
+    </div>
+  </div>
+</div>
+
+<!-- 预设权重说明弹窗 -->
+<div id="preset-help-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+  <div class="bg-white rounded-xl w-full max-w-2xl p-6 shadow-2xl max-h-[80vh] overflow-auto">
+    <div class="flex items-start justify-between mb-4">
+      <h3 class="text-lg font-semibold">📚 五种选股风格详解</h3>
+      <button onclick="closePresetHelp()" class="text-slate-400 hover:text-slate-700">✕</button>
+    </div>
+    <div class="space-y-4 text-sm">
+      <div class="p-4 bg-slate-50 rounded-lg">
+        <div class="font-semibold mb-1">⚖️ 均衡型（推荐新手）</div>
+        <div class="text-xs text-slate-500 mb-2">权重：技术 35% · 基本 20% · 情绪 20% · 资金 25%</div>
+        <div class="text-slate-700">四维度接近等权，稍偏技术和资金。<b>不预设偏好</b>，适合不了解自己风格的用户。</div>
+      </div>
+      <div class="p-4 bg-slate-50 rounded-lg">
+        <div class="font-semibold mb-1">🚀 动量型（短线波段）</div>
+        <div class="text-xs text-slate-500 mb-2">权重：技术 <b>55%</b> · 基本 5% · 情绪 15% · 资金 25%</div>
+        <div class="text-slate-700">重技术和资金，几乎不看基本面。<b>追强势股，靠 K 线和资金流向做判断</b>。适合短线波段。</div>
+      </div>
+      <div class="p-4 bg-slate-50 rounded-lg">
+        <div class="font-semibold mb-1">💎 价值型（中长线）</div>
+        <div class="text-xs text-slate-500 mb-2">权重：技术 15% · 基本 <b>55%</b> · 情绪 10% · 资金 20%</div>
+        <div class="text-slate-700">重估值和财务，<b>找便宜且赚钱的公司</b>。适合中长线持有，愿意等价值兑现。</div>
+      </div>
+      <div class="p-4 bg-slate-50 rounded-lg">
+        <div class="font-semibold mb-1">🌱 成长型</div>
+        <div class="text-xs text-slate-500 mb-2">权重：技术 25% · 基本 <b>40%</b> · 情绪 20% · 资金 15%</div>
+        <div class="text-slate-700">基本面为主但也看消息面情绪。<b>找业绩快速增长、有催化剂的股票</b>。</div>
+      </div>
+      <div class="p-4 bg-slate-50 rounded-lg">
+        <div class="font-semibold mb-1">💰 红利型（长线拿股息）</div>
+        <div class="text-xs text-slate-500 mb-2">权重：技术 10% · 基本 <b>60%</b> · 情绪 10% · 资金 20%</div>
+        <div class="text-slate-700">主要看基本面，<b>找稳定分红、财务健康的公司</b>。适合长期持有。</div>
+      </div>
+      <div class="p-4 bg-blue-50 rounded-lg border border-blue-200">
+        <div class="font-semibold mb-1">🎛️ 自定义</div>
+        <div class="text-slate-700">在首页选"自定义"卡片，滑块自由调节四个维度的权重。<b>想只看技术就把技术调到 100 其他调 0</b>。</div>
+      </div>
+    </div>
+  </div>
+</div>
 
 <script src="/static/app.js"></script>
 </body>

@@ -61,6 +61,13 @@ from fastapi.staticfiles import StaticFiles
 
 from web.api import routes
 
+# 启动时把所有策略注册进来
+try:
+    from strategies.registry import bootstrap
+    bootstrap()
+except Exception as e:
+    print(f"⚠️  策略加载失败: {e}")
+
 
 app = FastAPI(
     title="tonghuashunAI",

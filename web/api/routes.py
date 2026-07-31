@@ -44,6 +44,7 @@ class ScreenRequest(BaseModel):
     top_n: int = Field(10, description="最终返回前 N 只")
     use_llm: bool = Field(False, description="是否用 LLM 分析情绪面（慢）")
     as_of: Optional[str] = None
+    custom_weights: Optional[dict] = Field(None, description="覆盖 preset 的自定义四维权重")
 
 
 # 策略预设 = 权重方案
@@ -88,7 +89,16 @@ class BacktestRequest(BaseModel):
     limit: Optional[int] = 50
     initial_cash: float = 100_000
     min_score: float = 65.0
-    preset: str = Field("balanced", description="选股风格：balanced/momentum/value/growth/dividend")
+    preset: str = Field("balanced", description="打分权重预设（strategy_type=score 时）")
+
+    # 新增：策略类型
+    strategy_type: str = Field("score", description="score=四维打分策略 / technical=技术指标策略")
+    strategy_id: Optional[str] = Field(None, description="strategy_type=technical 时指定策略 id")
+    strategy_params: Optional[dict] = Field(None, description="策略参数（覆盖默认）")
+
+    # 自定义打分权重（strategy_type=score 且 preset=custom 时用）
+    custom_weights: Optional[dict] = None
+    position_size: Optional[float] = None  # 单只仓位比例，覆盖 configs
 
 
 class NewPortfolioRequest(BaseModel):
@@ -176,16 +186,16 @@ def check_datasources():
         checks.append({"name": "沪深300 成分股", "key": "universe", "ok": False,
                        "latency_ms": int((time.time() - t0) * 1000), "detail": str(e)[:80]})
 
-    # 3) 主力资金流（含回退）
+    # 3) 北向资金（比主力资金流轻量）
     t0 = time.time()
     try:
         from data_layer import moneyflow
-        df = moneyflow.stock_moneyflow(test_symbol)
-        checks.append({"name": "主力资金流", "key": "moneyflow", "ok": not df.empty,
+        df = moneyflow.northbound_daily()
+        checks.append({"name": "北向资金", "key": "northbound", "ok": not df.empty,
                        "latency_ms": int((time.time() - t0) * 1000),
                        "detail": f"{len(df)} 行" if not df.empty else "空"})
     except Exception as e:
-        checks.append({"name": "主力资金流", "key": "moneyflow", "ok": False,
+        checks.append({"name": "北向资金", "key": "northbound", "ok": False,
                        "latency_ms": int((time.time() - t0) * 1000), "detail": str(e)[:80]})
 
     # 4) 财报
@@ -397,7 +407,7 @@ def screen(req: ScreenRequest):
         or next((c for c in df_idx.columns if "名称" in c and "指数" not in c and "英文" not in c and "交易所" not in c), None)
 
     subset = df_idx.head(req.pool_limit)
-    weights = PRESET_WEIGHTS.get(req.preset, PRESET_WEIGHTS["balanced"])
+    weights = req.custom_weights if req.custom_weights else PRESET_WEIGHTS.get(req.preset, PRESET_WEIGHTS["balanced"])
 
     rows = []
     for _, row in subset.iterrows():
@@ -413,8 +423,8 @@ def screen(req: ScreenRequest):
     top = filtered[: req.top_n]
 
     return {
-        "preset": req.preset,
-        "preset_name": PRESET_LABELS.get(req.preset, {}).get("name", req.preset),
+        "preset": "custom" if req.custom_weights else req.preset,
+        "preset_name": "自定义" if req.custom_weights else PRESET_LABELS.get(req.preset, {}).get("name", req.preset),
         "weights": weights,
         "pool_size": len(subset),
         "matched": len(filtered),
@@ -529,7 +539,6 @@ def paper_run(req: PaperRunRequest):
 @router.post("/backtest/run", summary="跑一段历史回测")
 def backtest_run(req: BacktestRequest):
     from data_layer import universe as uni
-    from my_strategies import swing_v1
     from backtest import engine, report
 
     fn_map = {
@@ -543,7 +552,7 @@ def backtest_run(req: BacktestRequest):
     try:
         df_idx = fn_map[req.pool]()
     except Exception as e:
-        raise HTTPException(503, f"股票池数据源暂时不可用（AkShare 接口失败）：{e}。请稍后重试。")
+        raise HTTPException(503, f"股票池数据源暂时不可用：{e}")
 
     code_col = next((c for c in df_idx.columns if "成分券代码" in c), None) \
         or next((c for c in df_idx.columns if "代码" in c and "指数" not in c), None)
@@ -551,32 +560,60 @@ def backtest_run(req: BacktestRequest):
     if req.limit:
         symbols = symbols[: req.limit]
 
-    weights = PRESET_WEIGHTS.get(req.preset, PRESET_WEIGHTS["balanced"])
+    # 根据 strategy_type 选择策略函数
+    if req.strategy_type == "technical":
+        if not req.strategy_id:
+            raise HTTPException(400, "strategy_type=technical 时必须指定 strategy_id")
+        from strategies.adapter import make_strategy_fn
+        from strategies.registry import bootstrap
+        bootstrap()
+        strategy_fn = make_strategy_fn(
+            req.strategy_id,
+            params=req.strategy_params or {},
+            position_size=req.position_size or 0.18,
+        )
+        strategy_kwargs = {}
+        display_name = req.strategy_id
+        display_meta = {"strategy_id": req.strategy_id, "params": req.strategy_params or {}}
+    else:
+        from my_strategies import swing_v1
+        # 权重来源：custom > preset
+        if req.custom_weights:
+            weights = req.custom_weights
+        else:
+            weights = PRESET_WEIGHTS.get(req.preset, PRESET_WEIGHTS["balanced"])
+        strategy_fn = swing_v1.generate_signals
+        strategy_kwargs = {
+            "min_score": req.min_score,
+            "use_llm": False,
+            "weights": weights,
+        }
+        display_name = f"swing_v1_{req.preset}"
+        display_meta = {
+            "preset": req.preset,
+            "preset_name": PRESET_LABELS.get(req.preset, {}).get("name", req.preset),
+            "weights": weights,
+        }
 
     try:
         result = engine.run(
-            strategy_fn=swing_v1.generate_signals,
+            strategy_fn=strategy_fn,
             universe=symbols,
             start=req.start,
             end=req.end,
             initial_cash=req.initial_cash,
-            strategy_kwargs={
-                "min_score": req.min_score,
-                "use_llm": False,           # 回测强制关 LLM 避免天量调用
-                "weights": weights,
-            },
+            strategy_kwargs=strategy_kwargs,
         )
     except Exception as e:
-        raise HTTPException(503, f"回测执行失败：{e}。可能是数据源问题，请稍后重试或缩短回测时间。")
+        raise HTTPException(503, f"回测执行失败：{e}")
 
-    md_path = report.render(result, strategy_name=f"swing_v1_{req.preset}")
+    md_path = report.render(result, strategy_name=display_name)
     snapshots = result["snapshots"].copy()
     snapshots["date"] = snapshots["date"].astype(str)
     return {
-        "strategy": "swing_v1",
-        "preset": req.preset,
-        "preset_name": PRESET_LABELS.get(req.preset, {}).get("name", req.preset),
-        "weights": weights,
+        "strategy_type": req.strategy_type,
+        "strategy": display_name,
+        **display_meta,
         "metrics": result["metrics"],
         "snapshots": snapshots.to_dict(orient="records"),
         "trades_count": len(result["portfolio"].trades),
@@ -654,6 +691,172 @@ def notify_test(req: NotifyTestRequest):
     from notify.dispatch import notify, summary_line
     result = notify(req.title, req.text)
     return {"result": result, "summary": summary_line(result)}
+
+
+# ================ 策略库 =================
+
+
+@router.get("/strategies", summary="所有可用策略")
+def list_strategies(kind: Optional[str] = None):
+    from strategies.registry import registry, bootstrap
+    bootstrap()
+    metas = registry.list_all()
+    if kind:
+        metas = [m for m in metas if m.kind.value == kind]
+    result = []
+    for m in metas:
+        result.append({
+            "id": m.id, "name": m.name, "kind": m.kind.value,
+            "category": m.category, "description": m.description,
+            "tags": m.tags,
+            "params": [
+                {"name": p.name, "label": p.label, "type": p.type,
+                 "default": p.default, "min": p.min, "max": p.max,
+                 "step": p.step, "choices": p.choices, "help": p.help}
+                for p in m.params
+            ],
+        })
+    return {"count": len(result), "strategies": result}
+
+
+@router.get("/strategies/{strategy_id}", summary="策略详情")
+def get_strategy(strategy_id: str):
+    from strategies.registry import registry, bootstrap
+    bootstrap()
+    s = registry.get(strategy_id)
+    if s is None:
+        raise HTTPException(404, f"策略未找到: {strategy_id}")
+    m = s.meta
+    return {
+        "id": m.id, "name": m.name, "kind": m.kind.value,
+        "category": m.category, "description": m.description,
+        "long_description": m.long_description, "tags": m.tags,
+        "params": [
+            {"name": p.name, "label": p.label, "type": p.type,
+             "default": p.default, "min": p.min, "max": p.max,
+             "step": p.step, "choices": p.choices, "help": p.help}
+            for p in m.params
+        ],
+    }
+
+
+@router.get("/strategies/builder/indicators", summary="条件构建器可用指标")
+def builder_indicators():
+    from strategies.builder import list_indicators
+    return {"indicators": list_indicators()}
+
+
+class BuilderSaveRequest(BaseModel):
+    id: str
+    name: str
+    description: str = ""
+    buy: dict = Field(default_factory=dict)
+    sell: dict = Field(default_factory=dict)
+
+
+@router.post("/strategies/builder", summary="保存条件构建器策略")
+def save_builder_strategy(req: BuilderSaveRequest):
+    from strategies.builder import validate_spec, BuilderStrategy
+    from strategies.registry import registry
+    import yaml as _yaml
+
+    spec = req.model_dump()
+    ok, err = validate_spec(spec)
+    if not ok:
+        raise HTTPException(400, err)
+
+    # 保存到 configs/user_strategies/{id}.yaml
+    out = Path("configs/user_strategies") / f"{spec['id']}.yaml"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(_yaml.safe_dump(spec, allow_unicode=True, sort_keys=False), encoding="utf-8")
+
+    # 立即注册（覆盖旧版）
+    strat = BuilderStrategy(spec)
+    registry.register(strat)
+
+    return {"ok": True, "id": spec["id"]}
+
+
+@router.delete("/strategies/builder/{strategy_id}", summary="删除条件构建器策略")
+def delete_builder_strategy(strategy_id: str):
+    from strategies.registry import registry
+    out = Path("configs/user_strategies") / f"{strategy_id}.yaml"
+    if out.exists():
+        out.unlink()
+    registry.unregister(strategy_id)
+    return {"ok": True}
+
+
+# ================ 用户 Python 策略 =================
+
+
+USER_PY_DIR = Path("strategies/user_defined")
+
+
+@router.get("/strategies/python/template", summary="Python 策略模板")
+def python_template():
+    from strategies.user_defined_loader import DEFAULT_TEMPLATE
+    return {"template": DEFAULT_TEMPLATE}
+
+
+@router.get("/strategies/python/list", summary="用户 Python 策略文件列表")
+def list_python_strategies():
+    if not USER_PY_DIR.exists():
+        return {"files": []}
+    items = []
+    for f in sorted(USER_PY_DIR.glob("*.py")):
+        if f.name.startswith("__"):
+            continue
+        items.append({"filename": f.name, "size": f.stat().st_size,
+                      "mtime": f.stat().st_mtime})
+    return {"files": items}
+
+
+@router.get("/strategies/python/{filename}", summary="读取用户 Python 策略源码")
+def read_python_strategy(filename: str):
+    if "/" in filename or ".." in filename or not filename.endswith(".py"):
+        raise HTTPException(400, "非法文件名")
+    p = USER_PY_DIR / filename
+    if not p.exists():
+        raise HTTPException(404, "文件不存在")
+    return {"filename": filename, "source": p.read_text(encoding="utf-8")}
+
+
+class PythonSaveRequest(BaseModel):
+    filename: str
+    source: str
+
+
+@router.post("/strategies/python", summary="保存用户 Python 策略")
+def save_python_strategy(req: PythonSaveRequest):
+    if "/" in req.filename or ".." in req.filename or not req.filename.endswith(".py"):
+        raise HTTPException(400, "文件名必须是纯文件名且以 .py 结尾")
+
+    USER_PY_DIR.mkdir(parents=True, exist_ok=True)
+    p = USER_PY_DIR / req.filename
+    p.write_text(req.source, encoding="utf-8")
+
+    # 尝试加载并注册
+    try:
+        from strategies.user_defined_loader import load_user_python
+        from strategies.registry import registry
+        strat = load_user_python(p)
+        if strat:
+            registry.register(strat)
+        return {"ok": True, "filename": req.filename, "registered": bool(strat),
+                "strategy_id": strat.meta.id if strat else None}
+    except Exception as e:
+        raise HTTPException(400, f"策略保存但注册失败：{e}。请检查语法。")
+
+
+@router.delete("/strategies/python/{filename}", summary="删除用户 Python 策略")
+def delete_python_strategy(filename: str):
+    if "/" in filename or ".." in filename or not filename.endswith(".py"):
+        raise HTTPException(400, "非法文件名")
+    p = USER_PY_DIR / filename
+    if p.exists():
+        p.unlink()
+    return {"ok": True}
 
 
 # ================ 设置 =================
