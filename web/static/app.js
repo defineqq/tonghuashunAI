@@ -1478,6 +1478,11 @@ async function loadStrategiesLab() {
   await loadPresetStrategies();
 }
 
+function _idBadge(id) {
+  // 英文 id 徽章，等宽字体，一眼看出
+  return `<code class="text-[11px] font-mono px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200">${id}</code>`;
+}
+
 async function loadPresetStrategies() {
   try {
     const r = await API('/strategies');
@@ -1486,41 +1491,178 @@ async function loadPresetStrategies() {
     const builder = r.strategies.filter(s => s.kind === 'builder');
     const python = r.strategies.filter(s => s.kind === 'python');
     const list = document.getElementById('preset-strategy-list');
+
     list.innerHTML = preset.map(s => `
       <div class="border border-slate-200 rounded-lg p-4 hover:shadow-md transition-shadow">
-        <div class="flex items-start justify-between mb-2">
-          <div>
-            <div class="font-semibold">${s.name}</div>
+        <div class="flex items-start justify-between mb-2 gap-2">
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="font-semibold">${s.name}</span>
+              ${_idBadge(s.id)}
+            </div>
             <div class="text-xs text-slate-400 mt-0.5">${s.category} · ${s.tags.join(' · ')}</div>
           </div>
+          <button onclick="cloneStrategyToBuilder('${s.id}')"
+            title="预置策略不能直接改，但可以复制一份为自定义策略后修改"
+            class="text-xs px-2 py-1 rounded bg-slate-100 text-slate-600 hover:bg-slate-200 whitespace-nowrap">
+            📋 复制为自定义
+          </button>
         </div>
         <div class="text-sm text-slate-600 leading-relaxed">${s.description}</div>
         <details class="mt-2 text-xs">
           <summary class="cursor-pointer text-blue-500">参数</summary>
           <div class="mt-2 space-y-1">
-            ${s.params.map(p => `<div class="flex justify-between"><span>${p.label}</span><span class="text-slate-400">默认 ${p.default}</span></div>`).join('')}
+            ${s.params.map(p => `<div class="flex justify-between"><span>${p.label} <code class="text-[10px] text-slate-400">${p.name}</code></span><span class="text-slate-400">默认 ${p.default}</span></div>`).join('')}
           </div>
         </details>
       </div>
     `).join('');
-    // 若有 builder 或 python 策略，也追加显示
+
     if (builder.length || python.length) {
-      list.innerHTML += `<div class="col-span-full mt-4 text-sm font-semibold text-slate-700">你创建的策略</div>` + [...builder, ...python].map(s => `
-        <div class="border border-blue-200 bg-blue-50 rounded-lg p-4">
-          <div class="flex items-start justify-between mb-2">
-            <div>
-              <div class="font-semibold">${s.name}</div>
-              <div class="text-xs text-slate-400 mt-0.5">${s.kind === 'builder' ? '🎛️ 条件构建' : '🐍 Python'} · ${s.tags.join(' · ')}</div>
+      list.innerHTML += `<div class="col-span-full mt-4 text-sm font-semibold text-slate-700">你创建的策略（可以编辑 / 删除）</div>`
+        + [...builder, ...python].map(s => {
+          const isBuilder = s.kind === 'builder';
+          const editBtn = isBuilder
+            ? `<button onclick="editBuilderStrategy('${s.id}')" class="text-xs px-2 py-1 rounded bg-blue-100 text-blue-700 hover:bg-blue-200">✏️ 编辑</button>`
+            : `<button onclick="editPythonStrategy('${s.id}')" class="text-xs px-2 py-1 rounded bg-blue-100 text-blue-700 hover:bg-blue-200">✏️ 编辑</button>`;
+          const delBtn = `<button onclick="deleteStrategy('${s.id}','${s.kind}')" class="text-xs px-2 py-1 rounded bg-red-100 text-red-700 hover:bg-red-200">🗑 删除</button>`;
+          return `
+            <div class="border border-blue-200 bg-blue-50 rounded-lg p-4">
+              <div class="flex items-start justify-between mb-2 gap-2">
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <span class="font-semibold">${s.name}</span>
+                    ${_idBadge(s.id)}
+                  </div>
+                  <div class="text-xs text-slate-400 mt-0.5">${isBuilder ? '🎛️ 条件构建' : '🐍 Python'} · ${s.tags.join(' · ')}</div>
+                </div>
+                <div class="flex gap-1 whitespace-nowrap">${editBtn}${delBtn}</div>
+              </div>
+              <div class="text-sm text-slate-600">${s.description}</div>
             </div>
-          </div>
-          <div class="text-sm text-slate-600">${s.description}</div>
-        </div>
-      `).join('');
+          `;
+        }).join('');
     }
   } catch (e) {
     document.getElementById('preset-strategy-list').innerHTML = `<div class="text-red-500">加载失败: ${e.message}</div>`;
   }
 }
+
+// ---- 编辑 / 删除 / 复制 ----
+
+async function _switchLabTab(name) {
+  document.querySelectorAll('.lab-subtab').forEach(b => {
+    const active = b.dataset.subtab === name;
+    b.classList.toggle('active', active);
+    b.classList.toggle('border-blue-500', active);
+    b.classList.toggle('text-blue-600', active);
+    b.classList.toggle('font-medium', active);
+    b.classList.toggle('border-transparent', !active);
+    b.classList.toggle('text-slate-500', !active);
+  });
+  document.querySelectorAll('.lab-panel').forEach(p => p.classList.add('hidden'));
+  document.getElementById(`lab-${name}`).classList.remove('hidden');
+  if (name === 'builder') await loadIndicators();
+  if (name === 'python') await loadPythonList();
+}
+
+async function _loadBuilderSpecIntoForm(spec) {
+  await loadIndicators();  // 保证 indicators 数组已加载
+  document.getElementById('builder-id').value = spec.id || '';
+  document.getElementById('builder-name').value = spec.name || '';
+  builderBuyRules = (spec.buy?.rules || []).map(r => ({
+    indicator: r.indicator, op: r.op,
+    params: r.params || {}, value: r.value ?? null,
+  }));
+  builderSellRules = (spec.sell?.rules || []).map(r => ({
+    indicator: r.indicator, op: r.op,
+    params: r.params || {}, value: r.value ?? null,
+  }));
+  const buyLogic = (spec.buy?.logic || 'AND').toUpperCase();
+  const sellLogic = (spec.sell?.logic || 'OR').toUpperCase();
+  document.querySelectorAll('input[name="buy-logic"]').forEach(el => el.checked = el.value === buyLogic);
+  document.querySelectorAll('input[name="sell-logic"]').forEach(el => el.checked = el.value === sellLogic);
+  renderRules('buy');
+  renderRules('sell');
+}
+
+window.editBuilderStrategy = async function(id) {
+  try {
+    const spec = await API(`/strategies/builder/${encodeURIComponent(id)}/spec`);
+    await _switchLabTab('builder');
+    await _loadBuilderSpecIntoForm(spec);
+    document.getElementById('builder-status').innerHTML =
+      `<span class="text-blue-600">已加载 <code>${id}</code>，修改后点「保存策略」会覆盖旧版本。</span>`;
+    document.getElementById('lab-builder').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (e) {
+    alert('加载失败: ' + e.message);
+  }
+};
+
+window.cloneStrategyToBuilder = async function(presetId) {
+  const meta = allStrategies.find(x => x.id === presetId);
+  if (!meta) return;
+  const suggestedId = `my_${presetId}_${Date.now().toString(36).slice(-4)}`;
+  const suggestedName = `我的 ${meta.name}`;
+  if (!confirm(
+    `预置策略「${meta.name}」是内置的、不能直接改。\n` +
+    `将创建一个空白的自定义策略「${suggestedName}」（id: ${suggestedId}），你可以在条件构建器里从零编辑。\n` +
+    `继续？`
+  )) return;
+  await _switchLabTab('builder');
+  await loadIndicators();
+  document.getElementById('builder-id').value = suggestedId;
+  document.getElementById('builder-name').value = suggestedName;
+  // 清空规则从头开始（预置策略的规则是硬编码的 Python 代码，没法直接转成 builder spec）
+  builderBuyRules = [];
+  builderSellRules = [];
+  addRule('buy'); addRule('sell');
+  document.getElementById('builder-status').innerHTML =
+    `<span class="text-slate-500">已准备一个空白副本。参考「${meta.name}」的逻辑手工配置规则即可。原策略描述：${meta.description}</span>`;
+  document.getElementById('lab-builder').scrollIntoView({ behavior: 'smooth', block: 'start' });
+};
+
+window.editPythonStrategy = async function(id) {
+  // Python 策略的 id 来自文件名（去 .py + 前缀 user_python_）；
+  // 直接以 id 尝试匹配 .py 文件
+  await _switchLabTab('python');
+  try {
+    const list = await API('/strategies/python/list');
+    // id 可能是 "user_python_xxx" 或 "xxx"；文件名是 xxx.py
+    const guess = id.replace(/^user_python_/, '') + '.py';
+    const match = list.files.find(f => f.filename === guess) || list.files.find(f => f.filename.startsWith(id));
+    const filename = match ? match.filename : guess;
+    const r = await API(`/strategies/python/${encodeURIComponent(filename)}`);
+    document.getElementById('py-filename').value = filename;
+    document.getElementById('py-source').value = r.source;
+    document.getElementById('py-status').innerHTML =
+      `<span class="text-blue-600">已加载 <code>${filename}</code>，保存会覆盖并重新注册。</span>`;
+    document.getElementById('lab-python').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (e) {
+    alert('加载失败: ' + e.message);
+  }
+};
+
+window.deleteStrategy = async function(id, kind) {
+  if (!confirm(`确定删除策略 "${id}"？此操作会同时删除磁盘上的文件，不可恢复。`)) return;
+  try {
+    if (kind === 'builder') {
+      await API(`/strategies/builder/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    } else if (kind === 'python') {
+      const list = await API('/strategies/python/list');
+      const guess = id.replace(/^user_python_/, '') + '.py';
+      const match = list.files.find(f => f.filename === guess) || list.files.find(f => f.filename.startsWith(id));
+      const filename = match ? match.filename : guess;
+      await API(`/strategies/python/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+    } else {
+      alert('预置策略不能删除，可以点「复制为自定义」再删除副本');
+      return;
+    }
+    await loadPresetStrategies();
+  } catch (e) {
+    alert('删除失败: ' + e.message);
+  }
+};
 
 async function loadIndicators() {
   if (indicators.length) return;

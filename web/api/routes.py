@@ -974,6 +974,24 @@ def builder_indicators():
     return {"indicators": list_indicators()}
 
 
+@router.get("/strategies/builder/{strategy_id}/spec",
+            summary="读取条件构建器策略的完整 spec（用于编辑）")
+def get_builder_spec(strategy_id: str):
+    """
+    从 configs/user_strategies/{id}.yaml 读原始 spec，供前端「编辑」按钮回填表单。
+    """
+    import yaml as _yaml
+    out = Path("configs/user_strategies") / f"{strategy_id}.yaml"
+    if out.exists():
+        return _yaml.safe_load(out.read_text(encoding="utf-8"))
+    # 兜底：如果不在磁盘（例如内存中的 BuilderStrategy），直接从 registry 里读
+    from strategies.registry import registry
+    s = registry.get(strategy_id)
+    if s is None or not hasattr(s, "spec"):
+        raise HTTPException(404, f"策略 {strategy_id} 不存在或不是条件构建器策略")
+    return s.spec
+
+
 class BuilderFromAIRequest(BaseModel):
     prompt: str = Field(..., description="中文自然语言描述你想要的策略")
     suggested_id: Optional[str] = None
