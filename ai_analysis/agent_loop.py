@@ -71,6 +71,8 @@ class AgentTask:
     final: dict[str, Any] | None = None
     error: str | None = None
     provider: str = "stub"
+    # 引用旧任务作为经验（避免让 AI 从零摸索）；仅保留 12 字符 task_id
+    reference_ids: list[str] = field(default_factory=list)
 
     def path(self) -> Path:
         return TASKS_DIR / f"{self.task_id}.json"
@@ -110,6 +112,9 @@ class AgentTask:
         if self.finished_at:
             lines.append(f"- **结束时间**：{self.finished_at}")
         lines.append(f"- **已跑轮数**：{len(self.steps)}")
+        if self.reference_ids:
+            ids_str = ", ".join(f"`{i}`" for i in self.reference_ids)
+            lines.append(f"- **引用参考任务**：{ids_str}")
         lines.append("")
 
         # 最终结论（如果有）
@@ -392,6 +397,63 @@ def _extract_json(text: str) -> dict:
         raise
 
 
+def _render_reference_summary(task_id: str) -> str | None:
+    """
+    读一个旧任务，摘一段精简摘要给新任务的 prompt 用。
+    只包含：目标、状态、每轮的关键 config→metrics、最终结论。
+    过滤掉 raw_llm 等占体积的字段。
+    """
+    ref = AgentTask.load(task_id)
+    if ref is None:
+        return f"⚠️ 引用任务 {task_id} 不存在，已忽略。"
+    parts = [
+        f"### 参考任务 `{ref.task_id}`",
+        f"- **原目标**：{ref.goal[:200]}",
+        f"- **状态**：{ref.status} · 共 {len(ref.steps)} 步",
+    ]
+    if ref.final:
+        summary = ref.final.get("summary")
+        if summary:
+            parts.append(f"- **最终结论**：{summary[:500]}")
+        best = ref.final.get("best")
+        if best:
+            parts.append("- **推荐配置**：```json\n"
+                         + json.dumps(best, ensure_ascii=False)[:500] + "\n```")
+    # 每轮回测的关键结果（精简）
+    bt_lines = []
+    for s in ref.steps:
+        if s.action in ("backtest_score", "backtest_technical") and s.result:
+            m = s.result.get("metrics") or {}
+            cfg = s.result.get("config") or {}
+            cfg_str = json.dumps({k: v for k, v in cfg.items() if k != "weights"},
+                                  ensure_ascii=False)
+            bt_lines.append(
+                f"  · [#{s.idx}] {cfg_str} → 累计 {m.get('cumulative_return',0)*100:.1f}%"
+                f" 回撤 {m.get('max_drawdown',0)*100:.1f}% 夏普 {m.get('sharpe',0):.2f}"
+            )
+    if bt_lines:
+        parts.append("- **已跑过的回测**（避免重复）：\n" + "\n".join(bt_lines))
+    return "\n".join(parts)
+
+
+def _render_reference_block(reference_ids: list[str]) -> str:
+    """把所有引用任务拼成一段 prompt 内容。空列表时返回空串。"""
+    if not reference_ids:
+        return ""
+    blocks = []
+    for tid in reference_ids:
+        s = _render_reference_summary(tid)
+        if s:
+            blocks.append(s)
+    if not blocks:
+        return ""
+    return (
+        "\n\n## 📚 参考此前的实验结果（不要重复相同 config）\n\n"
+        + "\n\n".join(blocks)
+        + "\n\n**基于以上参考决定下一步**：可以复用其结论、进一步微调，或换角度探索。\n"
+    )
+
+
 def _render_history(steps: list[Step]) -> str:
     if not steps:
         return "(还没有跑过实验)"
@@ -447,9 +509,11 @@ def _ask_llm(task: AgentTask) -> tuple[dict, str]:
              }}
         return d, "[stub reply]"
 
+    # 引用旧任务作为经验（如果有）
+    ref_block = _render_reference_block(task.reference_ids)
     prompt = (
         _PROMPT_TMPL
-        .replace("{{user_goal}}", task.goal)
+        .replace("{{user_goal}}", task.goal + ref_block)
         .replace("{{max_iterations}}", str(task.max_iterations))
         .replace("{{iter_count}}", str(len(task.steps)))
         .replace("{{history}}", _render_history(task.steps))
@@ -572,15 +636,26 @@ def cancel_task(task_id: str) -> Optional[AgentTask]:
     return t
 
 
-def start_agent(goal: str, max_iterations: int = 10) -> AgentTask:
-    """创建任务并启动后台线程。返回可查询的 AgentTask（初始 status=running）。"""
+def start_agent(goal: str, max_iterations: int = 10,
+                reference_ids: list[str] | None = None) -> AgentTask:
+    """
+    创建任务并启动后台线程。返回可查询的 AgentTask（初始 status=running）。
+
+    Args:
+        goal: 用户目标
+        max_iterations: 上限轮数（1~50）
+        reference_ids: 引用的旧任务 ID 列表；旧任务的目标 / 结论 / 已跑回测
+                       会被摘要后注入到 prompt，让 AI 复用经验，不重复劳动
+    """
     max_iterations = max(1, min(int(max_iterations or 10), 50))
+    refs = [rid.strip() for rid in (reference_ids or []) if rid and rid.strip()]
     task = AgentTask(
         task_id=uuid.uuid4().hex[:12],
         goal=goal.strip(),
         max_iterations=max_iterations,
         started_at=datetime.now().isoformat(timespec="seconds"),
         provider=current_provider(),
+        reference_ids=refs,
     )
     task.save()
     Thread(target=_run_loop, args=(task,), daemon=True).start()
@@ -601,6 +676,7 @@ def list_tasks(limit: int = 20) -> list[dict]:
                 "started_at": d["started_at"],
                 "step_count": len(d.get("steps", [])),
                 "provider": d.get("provider"),
+                "reference_ids": d.get("reference_ids", []),
             })
         except Exception:
             continue

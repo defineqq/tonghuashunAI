@@ -909,6 +909,10 @@ window.startAgent = async function() {
   const goal = document.getElementById('agent-goal').value.trim();
   if (!goal) { alert('请输入你的目标'); return; }
   const maxIter = parseInt(document.getElementById('agent-max-iter').value) || 8;
+  const refsRaw = (document.getElementById('agent-refs')?.value || '').trim();
+  const reference_ids = refsRaw
+    ? refsRaw.split(/[\s,，]+/).map(s => s.trim()).filter(Boolean)
+    : [];
   const btn = document.getElementById('agent-start-btn');
   const btnText = document.getElementById('agent-start-btn-text');
   const status = document.getElementById('agent-status');
@@ -920,7 +924,7 @@ window.startAgent = async function() {
   try {
     const r = await API('/agent/run', {
       method: 'POST',
-      body: JSON.stringify({ goal, max_iterations: maxIter }),
+      body: JSON.stringify({ goal, max_iterations: maxIter, reference_ids }),
     });
     window._agentCurrentTaskId = r.task_id;
     document.getElementById('agent-task-id').textContent = r.task_id;
@@ -954,6 +958,17 @@ window.refreshAgent = async function() {
     }[t.status] || 'bg-slate-100 text-slate-700';
     pill.className = `text-[11px] px-2 py-0.5 rounded ${pillCls}`;
     pill.textContent = t.status;
+    // 显示引用了哪些历史任务
+    const refsEl = document.getElementById('agent-refs-pill');
+    if (refsEl) {
+      if (t.reference_ids && t.reference_ids.length) {
+        refsEl.classList.remove('hidden');
+        refsEl.title = '本任务引用了：' + t.reference_ids.join(', ');
+        refsEl.textContent = `📚 引用 ${t.reference_ids.length} 个`;
+      } else {
+        refsEl.classList.add('hidden');
+      }
+    }
     renderAgentSteps(t);
     if (t.status !== 'running') {
       if (window._agentPollTimer) clearInterval(window._agentPollTimer);
@@ -964,6 +979,74 @@ window.refreshAgent = async function() {
   } catch (e) {
     console.warn('agent poll error', e);
   }
+};
+
+window.useAsReference = function(taskId) {
+  const input = document.getElementById('agent-refs');
+  if (!input) return;
+  const cur = input.value.split(/[\s,，]+/).map(s => s.trim()).filter(Boolean);
+  if (cur.includes(taskId)) {
+    // 提示已经在里面了
+    input.classList.add('ring-2', 'ring-purple-400');
+    setTimeout(() => input.classList.remove('ring-2', 'ring-purple-400'), 800);
+    return;
+  }
+  cur.push(taskId);
+  input.value = cur.join(', ');
+  // 滚动到表单顶部 + 高亮
+  document.getElementById('agent-goal').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  input.classList.add('ring-2', 'ring-purple-400');
+  setTimeout(() => input.classList.remove('ring-2', 'ring-purple-400'), 1000);
+};
+
+window.pickRefsFromHistory = async function() {
+  try {
+    const r = await API('/agent?limit=30');
+    // 只列已完成/取消的任务作为可参考对象（running 中的没意义）
+    const usable = r.tasks.filter(t => t.status !== 'running');
+    if (!usable.length) { alert('还没有可参考的历史任务'); return; }
+    const cur = (document.getElementById('agent-refs')?.value || '')
+      .split(/[\s,，]+/).map(s => s.trim()).filter(Boolean);
+    // 构建一个简易多选弹窗（用 confirm 太粗糙，改用 modal）
+    const modal = document.createElement('div');
+    modal.className = 'fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4';
+    modal.innerHTML = `
+      <div class="bg-white rounded-xl w-full max-w-2xl max-h-[80vh] flex flex-col shadow-2xl">
+        <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between">
+          <div class="font-semibold">📚 选择要引用的历史任务</div>
+          <button id="refs-close" class="text-slate-400 hover:text-slate-700 text-xl">✕</button>
+        </div>
+        <div class="p-4 overflow-auto flex-1 space-y-2 text-sm">
+          ${usable.map(t => `
+            <label class="flex items-start gap-2 p-2 rounded border border-slate-100 hover:bg-slate-50 cursor-pointer">
+              <input type="checkbox" data-tid="${t.task_id}" ${cur.includes(t.task_id)?'checked':''} class="mt-0.5">
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2">
+                  <code class="text-[11px] font-mono px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">${t.task_id}</code>
+                  <span class="text-[11px] text-slate-500">${t.status} · ${t.step_count} 步</span>
+                </div>
+                <div class="text-xs text-slate-600 mt-0.5 line-clamp-2">${t.goal || ''}</div>
+              </div>
+            </label>
+          `).join('')}
+        </div>
+        <div class="px-5 py-3 border-t border-slate-200 flex justify-end gap-2">
+          <button id="refs-cancel" class="btn btn-ghost">取消</button>
+          <button id="refs-ok" class="btn btn-primary">确定</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    const cleanup = () => modal.remove();
+    modal.querySelector('#refs-close').onclick = cleanup;
+    modal.querySelector('#refs-cancel').onclick = cleanup;
+    modal.querySelector('#refs-ok').onclick = () => {
+      const picked = [...modal.querySelectorAll('input[type=checkbox]:checked')]
+        .map(i => i.dataset.tid);
+      document.getElementById('agent-refs').value = picked.join(', ');
+      cleanup();
+    };
+  } catch (e) { alert('加载失败: ' + e.message); }
 };
 
 window.viewAgentMarkdown = async function() {
@@ -1014,12 +1097,23 @@ async function loadAgentHistory() {
         failed: 'bg-red-50 text-red-600 border-red-200',
         cancelled: 'bg-slate-50 text-slate-600 border-slate-200',
       }[t.status] || 'bg-slate-50 text-slate-600 border-slate-200';
+      const refsPill = (t.reference_ids && t.reference_ids.length)
+        ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-200 whitespace-nowrap" title="引用了 ${t.reference_ids.join(', ')}">📚 ${t.reference_ids.length}</span>`
+        : '';
+      const canRef = t.status !== 'running';
+      const refBtn = canRef
+        ? `<button onclick="useAsReference('${t.task_id}')" title="作为参考塞进下次任务" class="text-xs px-2 py-0.5 rounded bg-purple-100 text-purple-700 hover:bg-purple-200">📚 参考</button>`
+        : '';
       return `
         <div class="border rounded p-2 flex items-center gap-2 ${cls}">
-          <span class="text-[11px] px-1.5 py-0.5 rounded bg-white/60 font-mono">${t.task_id}</span>
+          <span class="text-[11px] px-1.5 py-0.5 rounded bg-white/60 font-mono cursor-pointer hover:bg-white"
+            onclick="navigator.clipboard.writeText('${t.task_id}');this.textContent='✓ 已复制';setTimeout(()=>this.textContent='${t.task_id}',1000)"
+            title="点击复制 ID">${t.task_id}</span>
           <span class="text-[11px] px-1.5 py-0.5 rounded bg-white/60">${t.status}</span>
+          ${refsPill}
           <span class="text-xs flex-1 truncate">${t.goal}</span>
           <span class="text-[11px] text-slate-400 whitespace-nowrap">${t.step_count} 步 · ${(t.started_at||'').split('T')[0]}</span>
+          ${refBtn}
           <button onclick="attachAgentTask('${t.task_id}')" class="text-xs px-2 py-0.5 rounded bg-white/70 hover:bg-white">查看</button>
         </div>
       `;

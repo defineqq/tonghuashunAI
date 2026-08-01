@@ -1268,19 +1268,34 @@ def save_settings(req: SaveSettingsRequest):
 class AgentRunRequest(BaseModel):
     goal: str = Field(..., description="用户给 AI 的目标，例如「半年内找到累计收益 >100% 的策略」")
     max_iterations: int = Field(10, ge=1, le=50, description="最多允许 AI 决策多少轮")
+    reference_ids: list[str] = Field(
+        default_factory=list,
+        description="引用旧任务的 ID 列表（12 位 hex），旧任务的经验会被摘要注入 prompt，"
+                    "让 AI 不用重复试错。可以从「历史 AI 任务」列表复制。",
+    )
 
 
 @router.post("/agent/run", summary="启动 AI 自主回测研究任务（后台运行）")
 def agent_run(req: AgentRunRequest):
-    from ai_analysis.agent_loop import start_agent
+    from ai_analysis.agent_loop import start_agent, AgentTask
     if not req.goal.strip():
         raise HTTPException(400, "goal 不能为空")
-    task = start_agent(req.goal, max_iterations=req.max_iterations)
+    # 验证 reference_ids 至少有一个能找到，否则前端可能给错了
+    missing = [rid for rid in req.reference_ids
+               if rid.strip() and AgentTask.load(rid.strip()) is None]
+    if missing:
+        raise HTTPException(400, f"引用的任务 ID 不存在：{', '.join(missing)}")
+    task = start_agent(
+        req.goal,
+        max_iterations=req.max_iterations,
+        reference_ids=req.reference_ids,
+    )
     return {
         "task_id": task.task_id,
         "status": task.status,
         "provider": task.provider,
         "started_at": task.started_at,
+        "reference_ids": task.reference_ids,
     }
 
 
@@ -1298,6 +1313,7 @@ def agent_status(task_id: str):
         "max_iterations": t.max_iterations,
         "started_at": t.started_at,
         "finished_at": t.finished_at,
+        "reference_ids": t.reference_ids,
         "steps": [
             {
                 "idx": s.idx, "at": s.at, "action": s.action,
