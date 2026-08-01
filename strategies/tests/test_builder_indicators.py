@@ -92,6 +92,24 @@ CASES = [
     ("CHIP",          "profit>",        {"n":60}, 10),
     ("CHIP",          "trap>",          {"n":60}, 10),
     ("CHIP",          "concentration>", {"n":60}, 5),
+    # ---- M8.9 新增，填 AI 反复抱怨"无法表达"的缺口 ----
+    ("ATR",           "pct>",           {"n":14}, 1.0),
+    ("ATR",           "pct<",           {"n":14}, 10.0),
+    ("ATR",           "stop_hit",       {"n":14}, 1.5),
+    ("SLOPE_MA",      "up>",            {"n":20, "lookback":5}, 0.1),
+    ("SLOPE_MA",      "dn<",            {"n":20, "lookback":5}, -0.1),
+    ("SLOPE_MA",      "rising",         {"n":20, "lookback":5}, None),
+    ("SLOPE_MA",      "falling",        {"n":20, "lookback":5}, None),
+    ("MACD_HIST",     "hist>0",         {}, None),
+    ("MACD_HIST",     "hist<0",         {}, None),
+    ("MACD_HIST",     "hist_expanding", {}, 3),
+    ("MACD_HIST",     "hist_shrinking", {}, 3),
+    ("MACD_HIST",     "dif_stay_above_zero", {}, 3),
+    ("MACD_HIST",     "dif_stay_below_zero", {}, 3),
+    ("STAY_MA",       "above",          {"n":20, "days":3}, None),
+    ("STAY_MA",       "below",          {"n":20, "days":3}, None),
+    ("MARKET_CAP",    ">",              {}, 100),
+    ("MARKET_CAP",    "<",              {}, 1000),
 ]
 
 
@@ -109,8 +127,97 @@ def test_list_indicators_covers_new():
     keys = {i["key"] for i in list_indicators()}
     for expected in ["EMA", "MA_ARRANGE", "VOLUME", "AMOUNT", "TURNOVER",
                      "WR", "CCI", "OBV", "ADX", "HIGH_LOW_N", "CONSEC",
-                     "GAP", "LIMIT", "CHIP"]:
+                     "GAP", "LIMIT", "CHIP",
+                     "ATR", "SLOPE_MA", "MACD_HIST", "STAY_MA", "MARKET_CAP"]:
         assert expected in keys, f"missing {expected}"
+
+
+# ---- 新指标：语义正确性验证（不是随便过就行） ----------------------
+
+
+def test_slope_ma_up_matches_uptrend(bars):
+    """合成数据后 60 根是稳步上涨，MA20 应该在上升。"""
+    rule = {"indicator": "SLOPE_MA", "op": "rising",
+            "params": {"n": 20, "lookback": 5}, "value": None}
+    r = _eval_rule(bars, rule)
+    # 上涨段（后半 60 根，让 MA20 有时间形成）应该大量命中
+    assert r.iloc[-30:].sum() > 15, "上涨段 rising 命中太少"
+    # 下跌段前面应该很少命中
+    assert r.iloc[20:55].sum() < r.iloc[-30:].sum()
+
+
+def test_slope_ma_falling_matches_downtrend(bars):
+    rule = {"indicator": "SLOPE_MA", "op": "falling",
+            "params": {"n": 20, "lookback": 5}, "value": None}
+    r = _eval_rule(bars, rule)
+    # 下跌段（前 60 根）后半段应该有一定命中
+    early = r.iloc[25:55].sum()
+    late = r.iloc[-30:].sum()
+    assert early > late, f"falling 应更多在下跌段命中，实测 early={early} late={late}"
+
+
+def test_stay_ma_above_requires_all_days(bars):
+    """STAY_MA above 要求"连续 N 日"都在均线上；一天低于就不算。"""
+    rule = {"indicator": "STAY_MA", "op": "above",
+            "params": {"n": 20, "days": 3}, "value": None}
+    r = _eval_rule(bars, rule)
+    # 上涨段 stay above 命中数应大于下跌段
+    assert r.iloc[-30:].sum() > r.iloc[25:55].sum()
+
+
+def test_macd_hist_positive_vs_dif_cross_zero_differ(bars):
+    """
+    这条测试直接说明为什么要加 MACD_HIST：
+    AI 反复抱怨 dif_above_zero 只是"上穿瞬间"，无法判断"当前柱状图是正"。
+    新指标 hist>0 命中数应远大于旧的 dif_above_zero（后者一波趋势只命中 1 次）。
+    """
+    from strategies.base import TechnicalStrategy
+    dif, dea, hist = TechnicalStrategy.macd(bars["close"])
+    # 旧 op：只在上穿零轴那一根 K 线为 True
+    old = TechnicalStrategy.cross_up(dif, pd.Series(0, index=dif.index))
+    # 新 op：所有柱状图为正的 K 线都为 True
+    r_new = _eval_rule(bars, {"indicator": "MACD_HIST", "op": "hist>0",
+                              "params": {}, "value": None})
+    assert r_new.sum() > old.sum() + 5, \
+        f"MACD_HIST.hist>0 应比 dif 上穿零轴命中多得多，实测 new={r_new.sum()} old={old.sum()}"
+
+
+def test_atr_stop_hit_triggers_on_pullback(bars):
+    """
+    ATR 追踪止损：在稳步上涨末段应无触发，回撤（如涨停后的调整）会触发。
+    这里只验证"至少在整个序列上触发过"，避免假 True。
+    """
+    rule = {"indicator": "ATR", "op": "stop_hit",
+            "params": {"n": 14}, "value": 1.5}
+    r = _eval_rule(bars, rule)
+    assert r.dtype == bool
+    # 至少要有触发点（下跌段应该触发）
+    assert r.sum() > 0, "ATR stop_hit 应至少触发一次"
+
+
+def test_atr_pct_greater_than(bars):
+    rule = {"indicator": "ATR", "op": "pct>",
+            "params": {"n": 14}, "value": 0.1}
+    r = _eval_rule(bars, rule)
+    # 阈值极低（0.1%），几乎所有 K 线都应命中
+    assert r.iloc[-50:].sum() > 40
+
+
+def test_market_cap_uses_bars_attrs(bars):
+    """MARKET_CAP 从 bars.attrs['market_cap_yi'] 读，缺失时不过滤。"""
+    # 未注入市值：应全 True（不过滤）
+    r_no = _eval_rule(bars, {"indicator": "MARKET_CAP", "op": ">",
+                              "params": {}, "value": 100})
+    assert r_no.all()
+
+    # 注入 500 亿：过滤"> 100 亿"应全 True，过滤"> 1000 亿"应全 False
+    bars_with_mcap = bars.copy()
+    bars_with_mcap.attrs["market_cap_yi"] = 500.0
+    r_pass = _eval_rule(bars_with_mcap, {"indicator": "MARKET_CAP", "op": ">",
+                                          "params": {}, "value": 100})
+    r_fail = _eval_rule(bars_with_mcap, {"indicator": "MARKET_CAP", "op": ">",
+                                          "params": {}, "value": 1000})
+    assert r_pass.all() and (not r_fail.any())
 
 
 def test_validate_spec_accepts_new_indicators():

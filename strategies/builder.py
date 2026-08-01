@@ -265,6 +265,72 @@ INDICATORS: dict[str, dict[str, Any]] = {
             {"name": "down", "label": "跌停（跌幅 ≥ 9.5%）", "value_type": "none"},
         ],
     },
+    # ---- ATR：波动率 & 止损用 ----
+    "ATR": {
+        "label": "ATR 平均真实波幅",
+        "params": [
+            {"name": "n", "label": "周期", "type": "int", "default": 14, "min": 5, "max": 60},
+        ],
+        "ops": [
+            {"name": "pct>", "label": "ATR/收盘价（%）大于",  "value_type": "number", "value_default": 3.0},
+            {"name": "pct<", "label": "ATR/收盘价（%）小于",  "value_type": "number", "value_default": 1.5},
+            {"name": "stop_hit", "label": "股价较 N 日高点回落 ≥ K×ATR（追踪止损触发）",
+             "value_type": "number", "value_default": 1.5},
+        ],
+    },
+    # ---- 均线斜率：判断"MA 是否在上升/下降" ----
+    "SLOPE_MA": {
+        "label": "均线斜率",
+        "params": [
+            {"name": "n", "label": "均线周期", "type": "int", "default": 20, "min": 5, "max": 250},
+            {"name": "lookback", "label": "斜率窗口（日）", "type": "int", "default": 5, "min": 2, "max": 20},
+        ],
+        "ops": [
+            {"name": "up>", "label": "MA 近 lookback 日累计涨幅（%）大于", "value_type": "number", "value_default": 0.5},
+            {"name": "dn<", "label": "MA 近 lookback 日累计跌幅（%）大于（数字为负）",
+             "value_type": "number", "value_default": -0.5},
+            {"name": "rising", "label": "MA 在上升（连续 lookback 日创新高）", "value_type": "none"},
+            {"name": "falling", "label": "MA 在下降（连续 lookback 日创新低）", "value_type": "none"},
+        ],
+    },
+    # ---- MACD 柱状图：AI 反复说 dif_above_zero 只是"上穿瞬间"不够用 ----
+    "MACD_HIST": {
+        "label": "MACD 柱状图 (HIST)",
+        "params": [
+            {"name": "fast", "label": "快线", "type": "int", "default": 12, "min": 2, "max": 30},
+            {"name": "slow", "label": "慢线", "type": "int", "default": 26, "min": 5, "max": 60},
+            {"name": "signal", "label": "信号线", "type": "int", "default": 9, "min": 2, "max": 20},
+        ],
+        "ops": [
+            {"name": "hist>0", "label": "柱状图为正（多头动能）", "value_type": "none"},
+            {"name": "hist<0", "label": "柱状图为负（空头动能）", "value_type": "none"},
+            {"name": "hist_expanding", "label": "柱状图连续 N 日扩大（多头加速）", "value_type": "number", "value_default": 3},
+            {"name": "hist_shrinking", "label": "柱状图连续 N 日缩小（多头减速）", "value_type": "number", "value_default": 3},
+            {"name": "dif_stay_above_zero", "label": "DIF 连续 N 日在零轴上方", "value_type": "number", "value_default": 3},
+            {"name": "dif_stay_below_zero", "label": "DIF 连续 N 日在零轴下方", "value_type": "number", "value_default": 3},
+        ],
+    },
+    # ---- 均线连续位置：AI 反复说需要"股价连续 N 天在 MA20 之上" ----
+    "STAY_MA": {
+        "label": "股价相对均线（连续 N 日）",
+        "params": [
+            {"name": "n",       "label": "均线周期", "type": "int", "default": 20, "min": 5, "max": 250},
+            {"name": "days",    "label": "连续天数", "type": "int", "default": 3,  "min": 1, "max": 30},
+        ],
+        "ops": [
+            {"name": "above", "label": "连续 days 日收盘价在 MA 之上", "value_type": "none"},
+            {"name": "below", "label": "连续 days 日收盘价在 MA 之下", "value_type": "none"},
+        ],
+    },
+    # ---- 市值过滤：AI 之前用"成交额 5 亿"代理"市值 50 亿"，很粗糙 ----
+    "MARKET_CAP": {
+        "label": "总市值（亿元）",
+        "params": [],
+        "ops": [
+            {"name": ">", "label": "总市值大于（亿元）", "value_type": "number", "value_default": 100},
+            {"name": "<", "label": "总市值小于（亿元）", "value_type": "number", "value_default": 500},
+        ],
+    },
     # ---- 筹码分布（用 VWAP 代理） ----
     "CHIP": {
         "label": "筹码分布 (VWAP 代理)",
@@ -544,6 +610,83 @@ def _eval_rule(bars: pd.DataFrame, rule: dict) -> pd.Series:
         if op == "profit>":         return _ratio("profit") > v
         if op == "trap>":           return _ratio("trap") > v
         if op == "concentration>":  return _ratio("concentration") > v
+
+    elif ind == "ATR":
+        n = int(ps.get("n", 14))
+        atr = TechnicalStrategy.atr(bars["high"], bars["low"], close, n)
+        atr_pct = atr / close.replace(0, pd.NA) * 100
+        if op == "pct>":
+            return atr_pct > float(value)
+        if op == "pct<":
+            return atr_pct < float(value)
+        if op == "stop_hit":
+            # 追踪止损：以近 n 日收盘最高价为基准，当前价 ≤ 高点 - k×ATR 就触发
+            k = float(value)
+            rolling_high = close.rolling(n, min_periods=1).max()
+            trigger = rolling_high - k * atr
+            return close <= trigger
+
+    elif ind == "SLOPE_MA":
+        n = int(ps.get("n", 20))
+        lookback = int(ps.get("lookback", 5))
+        ma = TechnicalStrategy.sma(close, n)
+        # 斜率用"当前 MA / lookback 日前 MA - 1"表示为百分比
+        past = ma.shift(lookback)
+        slope_pct = (ma - past) / past.replace(0, pd.NA) * 100
+        if op == "up>":
+            return slope_pct > float(value)
+        if op == "dn<":
+            return slope_pct < float(value)
+        if op == "rising":
+            # 连续 lookback 日 MA 都在上升
+            diffs = ma.diff()
+            return diffs.rolling(lookback).apply(lambda x: (x > 0).all(), raw=True).astype(bool)
+        if op == "falling":
+            diffs = ma.diff()
+            return diffs.rolling(lookback).apply(lambda x: (x < 0).all(), raw=True).astype(bool)
+
+    elif ind == "MACD_HIST":
+        dif, dea, hist = TechnicalStrategy.macd(
+            close,
+            int(ps.get("fast", 12)),
+            int(ps.get("slow", 26)),
+            int(ps.get("signal", 9)),
+        )
+        if op == "hist>0":
+            return hist > 0
+        if op == "hist<0":
+            return hist < 0
+        if op == "hist_expanding":
+            n_days = int(value or 3)
+            # hist 上升 N 天：diff > 0 且连续 N 次
+            diffs = hist.diff()
+            return diffs.rolling(n_days).apply(lambda x: (x > 0).all(), raw=True).astype(bool)
+        if op == "hist_shrinking":
+            n_days = int(value or 3)
+            diffs = hist.diff()
+            return diffs.rolling(n_days).apply(lambda x: (x < 0).all(), raw=True).astype(bool)
+        if op == "dif_stay_above_zero":
+            n_days = int(value or 3)
+            return (dif > 0).rolling(n_days).apply(lambda x: x.all(), raw=True).astype(bool)
+        if op == "dif_stay_below_zero":
+            n_days = int(value or 3)
+            return (dif < 0).rolling(n_days).apply(lambda x: x.all(), raw=True).astype(bool)
+
+    elif ind == "STAY_MA":
+        n = int(ps.get("n", 20))
+        days = int(ps.get("days", 3))
+        ma = TechnicalStrategy.sma(close, n)
+        cond = close > ma if op == "above" else close < ma
+        return cond.rolling(days).apply(lambda x: x.all(), raw=True).astype(bool)
+
+    elif ind == "MARKET_CAP":
+        # 静态过滤：股票的最新总市值。回测 bars 里没有总市值列
+        # → 尝试从 bars.attrs 里读（回测引擎注入）；拿不到就返回全 True（不过滤）
+        mcap_yi = bars.attrs.get("market_cap_yi")  # 亿元
+        if mcap_yi is None:
+            return pd.Series(True, index=close.index)
+        v = float(value)
+        return pd.Series((mcap_yi > v) if op == ">" else (mcap_yi < v), index=close.index)
 
     # 未知规则：全 False
     return pd.Series(False, index=close.index)

@@ -61,6 +61,17 @@ def make_strategy_fn(strategy_id: str, params: dict | None = None,
         if df.empty:
             signal_cache[symbol] = (end_str, {})
             return {}
+        # 为 MARKET_CAP 指标注入总市值（亿元）—— 从全 A 快照读，读不到就不注入
+        try:
+            snap = market.snapshot()
+            mcap_col = next((c for c in snap.columns if "总市值" in c), None)
+            code_col = next((c for c in snap.columns if c in ("代码", "symbol")), None)
+            if mcap_col and code_col:
+                snap_row = snap[snap[code_col].astype(str).str.zfill(6) == symbol]
+                if not snap_row.empty:
+                    df.attrs["market_cap_yi"] = float(snap_row[mcap_col].iloc[0]) / 1e8
+        except Exception:
+            pass
         try:
             bar_signals = strategy.generate_signals(df, params or {})
         except Exception:
