@@ -5,11 +5,33 @@
 > **当前阶段：模拟盘 / 尚未接实盘。**
 
 <p align="center">
-  <img alt="tests" src="https://img.shields.io/badge/tests-28%2F28%20passing-brightgreen">
+  <img alt="tests" src="https://img.shields.io/badge/tests-125%2F125%20passing-brightgreen">
   <img alt="python" src="https://img.shields.io/badge/python-3.9-blue">
   <img alt="license" src="https://img.shields.io/badge/license-MIT-green">
   <img alt="stage" src="https://img.shields.io/badge/stage-paper%20trading-orange">
 </p>
+
+## 界面预览
+
+**🔍 智能选股 · 首页**（选风格 → 选池 → 一键筛出综合分最高的股票）
+
+![智能选股](docs/screenshots/01-screen.jpg)
+
+**筛选结果**（每只股票四维分数条 + 综合分，双击进个股分析）
+
+![选股结果](docs/screenshots/02-screen-results.jpg)
+
+**🧪 策略实验室 · 预置策略库 + 条件构建器 + Python 编辑器**
+
+![策略实验室](docs/screenshots/03-strategies-lab.jpg)
+
+**🤖 AI 自主研究员**（给一句话目标，AI 自己列策略/跑回测/换参数，全程 Markdown 复盘）
+
+![AI 研究员](docs/screenshots/04-ai-agent.jpg)
+
+**⚙️ 设置**（LLM Key 脱敏保存 · 通知渠道 · 策略参数）
+
+![设置](docs/screenshots/05-settings.jpg)
 
 ---
 
