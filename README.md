@@ -29,9 +29,7 @@
 
 ![AI 研究员](docs/screenshots/04-ai-agent.jpg)
 
-**⚙️ 设置**（LLM Key 脱敏保存 · 通知渠道 · 策略参数）
 
-![设置](docs/screenshots/05-settings.jpg)
 
 ---
 
