@@ -385,16 +385,50 @@ ACTIONS = {
 
 
 def _extract_json(text: str) -> dict:
+    """
+    从 LLM 回复里抽第一个合法 JSON 对象。容忍以下脏格式：
+    - 代码块包裹 ```json\n{...}\n```
+    - 前后有解释文字（"这是我的输出：\n{...}\n上面就是答案"）
+    - JSON 后又跟了对象或散文（json.loads 会报 Extra data）
+    """
     text = text.strip()
     if text.startswith("```"):
         text = re.sub(r"^```[a-zA-Z]*\n?", "", text).rstrip("`").rstrip()
+
+    start = text.find("{")
+    if start < 0:
+        raise ValueError("回复里没有找到 JSON 对象起始 `{`")
+
+    # raw_decode 只解一个对象，尾部剩余内容忽略——正好解决 Extra data
     try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        m = re.search(r"\{.*\}", text, re.DOTALL)
-        if m:
-            return json.loads(m.group(0))
-        raise
+        obj, _ = json.JSONDecoder().raw_decode(text[start:])
+        if isinstance(obj, dict):
+            return obj
+        raise ValueError(f"JSON 顶层不是对象而是 {type(obj).__name__}")
+    except json.JSONDecodeError as e:
+        # 兜底：括号平衡扫第一个完整对象（能处理少量非法尾巴）
+        depth, in_str, esc = 0, False, False
+        for i, ch in enumerate(text[start:], start=start):
+            if in_str:
+                if esc:
+                    esc = False
+                elif ch == "\\":
+                    esc = True
+                elif ch == '"':
+                    in_str = False
+                continue
+            if ch == '"':
+                in_str = True
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        return json.loads(text[start:i + 1])
+                    except json.JSONDecodeError:
+                        break
+        raise ValueError(f"无法从回复中解析 JSON：{e}")
 
 
 def _render_reference_summary(task_id: str) -> str | None:
@@ -522,7 +556,9 @@ def _ask_llm(task: AgentTask) -> tuple[dict, str]:
     try:
         return _extract_json(raw), raw
     except Exception as e:
-        raise ValueError(f"LLM 返回不是合法 JSON：{e}；raw={raw[:200]}")
+        err = ValueError(f"LLM 返回不是合法 JSON：{e}；raw={raw[:200]}")
+        err.raw_reply = raw  # type: ignore[attr-defined]  外层可保留完整 raw 用于复盘
+        raise err
 
 
 # ---- 主循环 -------------------------------------------------------
@@ -560,10 +596,13 @@ def _run_loop(task: AgentTask):
             try:
                 decision, raw_reply = _ask_llm(task)
             except Exception as e:
-                # 占位 step 转为失败状态，保留可见性
+                # 占位 step 转为失败状态，保留可见性；把 raw_reply 一并存下来便于复盘
                 step.action = "llm_error"
                 step.phase = "failed"
-                step.error = f"{type(e).__name__}: {str(e)[:200]}"
+                step.error = f"{type(e).__name__}: {str(e)[:500]}"
+                raw_from_exc = getattr(e, "raw_reply", None)
+                if raw_from_exc:
+                    step.raw_llm = raw_from_exc[:4000]
                 step.duration_ms = int((time.time() - t0) * 1000)
                 task.error = f"LLM 决策失败: {e}\n{traceback.format_exc()[-800:]}"
                 task.status = "failed"

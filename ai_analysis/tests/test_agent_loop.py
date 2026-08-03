@@ -43,6 +43,57 @@ def test_extract_json_handles_code_block():
     assert r == {"a": 1}
 
 
+def test_extract_json_handles_extra_data_after_object():
+    """真实 bug 案例：完整 JSON 后又跟了散文 → json.loads 报 Extra data。"""
+    raw = ('```json\n{"action": "backtest_technical", "args": {"start": "2024-01-01"}}\n```\n'
+           '上面就是我的决策，希望有用。')
+    r = agent_loop._extract_json(raw)
+    assert r["action"] == "backtest_technical"
+
+
+def test_extract_json_handles_two_back_to_back_objects():
+    """LLM 偶尔连输两个 JSON —— 只取第一个。"""
+    raw = '{"action": "finish", "args": {}}\n{"another": "obj"}'
+    r = agent_loop._extract_json(raw)
+    assert r["action"] == "finish"
+
+
+def test_extract_json_handles_preamble_text():
+    """前面有介绍语。"""
+    raw = '这是我的输出：\n{"action":"backtest_score","args":{}}'
+    assert agent_loop._extract_json(raw)["action"] == "backtest_score"
+
+
+def test_extract_json_rejects_when_no_object():
+    import pytest
+    with pytest.raises(ValueError):
+        agent_loop._extract_json("这里根本没 JSON。")
+
+
+def test_llm_error_persists_raw_reply(monkeypatch, isolate_tasks_dir):
+    """LLM 返回脏数据时，step.raw_llm 应保留完整原文用于复盘（不只是 200 截断）。"""
+    # 让 _ask_llm 抛带 raw_reply 属性的 ValueError
+    long_raw = "```json\n{" + '"x":1,' * 200 + '"end":true' + "\n```\n后面还有一堆解释文字" * 50
+
+    def fake_ask(t):
+        err = ValueError("LLM 返回不是合法 JSON：模拟")
+        err.raw_reply = long_raw
+        raise err
+
+    monkeypatch.setattr(agent_loop, "_ask_llm", fake_ask)
+    task = agent_loop.AgentTask(
+        task_id="rawpersist", goal="x", max_iterations=2,
+        started_at="now", provider="claude",
+    )
+    agent_loop._run_loop(task)
+    assert task.status == "failed"
+    last = task.steps[-1]
+    assert last.action == "llm_error"
+    assert last.raw_llm is not None
+    # 应存了远超 200 字节的原文（旧实现只有 error 字段前 200 字节）
+    assert len(last.raw_llm) > 500
+
+
 def test_finish_terminates_loop(monkeypatch):
     """LLM 一上来就 finish，应立刻停止。"""
     _stub_provider(monkeypatch)
