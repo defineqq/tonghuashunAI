@@ -292,25 +292,37 @@
         引擎开启后每 <span id="live-tick-display">15</span>s 拉快照撮合，只在交易时段（9:30-11:30 / 13:00-15:00）真实下单。刷新页面不丢。
       </p>
 
-      <!-- 账户基础操作 -->
-      <div class="flex gap-2 items-end flex-wrap mb-4">
-        <div>
-          <div class="label">账户名</div>
-          <input id="acct-name" type="text" placeholder="my_account" class="field w-40">
+      <!-- 已有账户列表（点击切换/删除） -->
+      <div id="acct-list-wrap" class="mb-4">
+        <div class="flex items-center justify-between mb-2">
+          <div class="text-sm font-medium text-slate-700">已有账户 · 点击卡片切换</div>
+          <button onclick="loadAccountList()" class="text-xs text-slate-400 hover:text-slate-700">🔄 刷新列表</button>
         </div>
-        <div>
-          <div class="label">初始资金 ¥</div>
-          <input id="acct-cash" type="number" value="100000" class="field w-32">
-        </div>
-        <button onclick="loadAccount()" class="btn btn-ghost">查看账户</button>
-        <button onclick="newAccount()" class="btn btn-ghost">新建账户</button>
-        <button onclick="runPaper()" id="paper-btn" class="btn btn-ghost">日频跑一次</button>
+        <div id="acct-list" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2"></div>
       </div>
 
-      <!-- 实时引擎控制（折叠） -->
+      <!-- 新建 & 当前账户操作 -->
+      <div class="border-t border-slate-100 pt-4 mb-4">
+        <div class="flex gap-2 items-end flex-wrap">
+          <div>
+            <div class="label">账户名（新建/切换）</div>
+            <input id="acct-name" type="text" placeholder="my_account" class="field w-40">
+          </div>
+          <div>
+            <div class="label">初始资金 ¥</div>
+            <input id="acct-cash" type="number" value="100000" class="field w-32">
+          </div>
+          <button onclick="newAccount()" class="btn btn-primary">➕ 新建账户</button>
+          <button onclick="loadAccount()" class="btn btn-ghost">查看账户</button>
+          <button onclick="runPaper()" id="paper-btn" class="btn btn-ghost">日频跑一次</button>
+          <button onclick="deleteAccount()" class="btn btn-ghost text-red-600 ml-auto">🗑 删除当前账户</button>
+        </div>
+      </div>
+
+      <!-- 实时引擎控制 -->
       <details id="live-engine-panel" class="border border-emerald-100 rounded-lg bg-emerald-50/30 p-4 mb-4">
         <summary class="cursor-pointer text-sm font-semibold text-emerald-900">
-          ⚡ 实时引擎（点开配置：让账户按策略自动跑实盘模拟）
+          ⚡ 实时引擎（每个账户独立引擎，可随时启动/停止/换策略）
         </summary>
         <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
           <div>
@@ -330,15 +342,15 @@
         </div>
         <div class="flex gap-2 items-center flex-wrap mt-3">
           <button onclick="startLive()" id="live-start-btn" class="btn btn-primary">▶ 启动引擎</button>
+          <button onclick="updateLive()" id="live-update-btn" class="btn btn-ghost hidden">🔄 应用新策略（不停引擎）</button>
           <button onclick="stopLive()" id="live-stop-btn" class="btn btn-ghost text-red-600 hidden">⏹ 停止引擎</button>
           <button onclick="openLiveOrderModal()" class="btn btn-ghost">📝 手动下单</button>
-          <button onclick="refreshLive()" class="btn btn-ghost text-xs">🔄 刷新引擎状态</button>
           <span id="live-status-msg" class="text-sm text-slate-500 ml-2"></span>
         </div>
       </details>
 
-      <!-- 账户展示（合并显示：持仓、成交、引擎状态、活跃委托） -->
-      <div id="acct-view" class="text-sm text-slate-500">先选一个账户或新建一个...</div>
+      <!-- 当前账户展示 -->
+      <div id="acct-view" class="text-sm text-slate-500">先在上方选一个账户或新建一个...</div>
       <div id="live-view" class="mt-4"></div>
     </div>
 

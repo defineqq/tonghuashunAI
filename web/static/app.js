@@ -32,7 +32,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
       loadAgentHistory();
       autoResumeRunningAgent();
       loadLiveStrategies();
-      // 只有当账户名填了、切进来才尝试拉引擎状态；避免空账户名下发 404
+      loadAccountList();
       if (document.getElementById('acct-name').value.trim()) refreshLive();
     }
   });
@@ -795,6 +795,67 @@ async function newAccount() {
   refreshLive();
 }
 window.newAccount = newAccount;
+
+async function loadAccountList() {
+  const wrap = document.getElementById('acct-list');
+  if (!wrap) return;
+  try {
+    const r = await API('/portfolio');
+    const list = r.accounts || [];
+    if (!list.length) {
+      wrap.innerHTML = '<div class="col-span-full text-xs text-slate-400 py-4 text-center border border-dashed border-slate-200 rounded">暂无账户，在下方新建一个</div>';
+      return;
+    }
+    const current = document.getElementById('acct-name').value.trim();
+    wrap.innerHTML = list.map(a => {
+      const active = a.account_id === current;
+      const engineOk = a.engine.status === 'running';
+      const pnlCls = a.pnl_pct >= 0 ? 'text-red-600' : 'text-emerald-600';
+      return `
+        <div class="border ${active ? 'border-blue-500 bg-blue-50' : 'border-slate-200 bg-white'} rounded-lg p-3 hover:shadow-md transition cursor-pointer"
+             onclick="switchAccount('${a.account_id}')">
+          <div class="flex items-center gap-2 mb-1">
+            <span class="font-semibold text-sm">${a.account_id}</span>
+            ${active ? '<span class="text-[10px] px-1.5 py-0.5 rounded bg-blue-500 text-white">当前</span>' : ''}
+            ${engineOk
+              ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">⚡ ${a.engine.strategy_id||'手动'}</span>`
+              : '<span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">引擎停</span>'}
+          </div>
+          <div class="text-xs text-slate-500 flex justify-between mt-1">
+            <span>总值 ¥${a.total_value.toLocaleString(undefined,{maximumFractionDigits:0})}</span>
+            <span class="${pnlCls} font-medium">${a.pnl_pct>=0?'+':''}${a.pnl_pct.toFixed(2)}%</span>
+          </div>
+          <div class="text-[11px] text-slate-400 mt-1">
+            现金 ¥${a.cash.toLocaleString(undefined,{maximumFractionDigits:0})} · 持仓 ${a.n_positions} · 成交 ${a.n_trades}
+          </div>
+        </div>
+      `;
+    }).join('');
+  } catch (e) {
+    wrap.innerHTML = `<div class="col-span-full text-xs text-red-500">加载失败: ${e.message}</div>`;
+  }
+}
+window.loadAccountList = loadAccountList;
+
+window.switchAccount = function(name) {
+  document.getElementById('acct-name').value = name;
+  loadAccount();
+  loadAccountList();
+};
+
+window.deleteAccount = async function() {
+  const name = document.getElementById('acct-name').value.trim();
+  if (!name) { alert('请先在上方选一个账户'); return; }
+  if (!confirm(`确定删除账户 ${name}？\n引擎、委托、持仓、状态全部清空，不可恢复。`)) return;
+  try {
+    await API(`/portfolio/${name}`, { method: 'DELETE' });
+    document.getElementById('acct-name').value = '';
+    document.getElementById('acct-view').innerHTML = '<span class="text-slate-500">已删除，请从上方选择或新建账户</span>';
+    document.getElementById('live-view').innerHTML = '';
+    document.getElementById('live-status-badge').classList.add('hidden');
+    loadAccountList();
+  } catch (e) { alert('删除失败: ' + e.message); }
+};
 
 async function runPaper() {
   const name = document.getElementById('acct-name').value.trim() || 'swing_v1';
@@ -2134,6 +2195,31 @@ async function stopLive() {
 }
 window.stopLive = stopLive;
 
+async function updateLive() {
+  const account = document.getElementById('acct-name').value.trim();
+  if (!account) return alert('请先选一个账户');
+  const strategyId = document.getElementById('live-strategy').value || '';
+  const symbols = document.getElementById('live-symbols').value
+    .split(/[,，\s]+/).map(s => s.trim()).filter(Boolean);
+  const tick = parseInt(document.getElementById('live-tick').value) || 15;
+  try {
+    await API(`/live/${account}/update`, {
+      method: 'POST',
+      body: JSON.stringify({
+        strategy_id: strategyId,
+        watch_symbols: symbols,
+        tick_seconds: tick,
+      }),
+    });
+    document.getElementById('live-status-msg').innerHTML =
+      `<span class="text-emerald-600">✓ 引擎已切换到 ${strategyId || '手动模式'}</span>`;
+    refreshLive();
+  } catch (e) {
+    alert('切换失败: ' + e.message);
+  }
+}
+window.updateLive = updateLive;
+
 function startLivePolling() {
   if (_livePollTimer) clearInterval(_livePollTimer);
   refreshLive();
@@ -2157,19 +2243,27 @@ async function refreshLive() {
     // 只要账户有 state 或有委托，就显示徽章
     const hasEngine = !!s || (r.orders && r.orders.length > 0);
     badge.classList.toggle('hidden', !hasEngine);
+    const updateBtn = document.getElementById('live-update-btn');
     if (s && s.status === 'running') {
-      badge.textContent = `⚡ 引擎运行中 · tick=${s.tick_seconds}s`;
+      badge.textContent = `⚡ 引擎运行中 · tick=${s.tick_seconds}s · 策略=${s.strategy_id || '手动'}`;
       badge.className = 'ml-2 text-[11px] px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200';
       stopBtn.classList.remove('hidden');
+      updateBtn.classList.remove('hidden');
       startBtn.textContent = '重新启动';
       if (!_livePollTimer) startLivePolling();
+      // 把当前引擎的策略/池子/tick 反向填回表单，方便"改完点应用"
+      if (s.strategy_id != null) document.getElementById('live-strategy').value = s.strategy_id || '';
+      if (s.watch_symbols) document.getElementById('live-symbols').value = s.watch_symbols.join(',');
+      if (s.tick_seconds) document.getElementById('live-tick').value = s.tick_seconds;
     } else if (hasEngine) {
       badge.textContent = s ? `⏹ 引擎 ${s.status}` : '⏹ 引擎已停止';
       badge.className = 'ml-2 text-[11px] px-2 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200';
       stopBtn.classList.add('hidden');
+      updateBtn.classList.add('hidden');
       startBtn.textContent = '▶ 启动引擎';
     } else {
       stopBtn.classList.add('hidden');
+      updateBtn.classList.add('hidden');
       startBtn.textContent = '▶ 启动引擎';
     }
     document.getElementById('live-tick-display').textContent = s ? s.tick_seconds : 15;

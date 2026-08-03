@@ -278,6 +278,34 @@ def stop_runner(account: str) -> bool:
         return True
 
 
+def update_runner(account: str, *, strategy_id: Optional[str] = None,
+                  strategy_params: dict | None = None,
+                  watch_symbols: list[str] | None = None,
+                  tick_seconds: Optional[int] = None) -> Optional[LiveRunner]:
+    """
+    热更新一个正在跑的 runner：不停线程，直接改内存里的策略/池子/参数。
+    只有传入的字段会被改；None 表示不动。
+    """
+    with _REG_LOCK:
+        r = _RUNNERS.get(account)
+        if r is None:
+            return None
+        if strategy_id is not None:
+            r.strategy_id = strategy_id or None  # 空串视为清空
+            r.state.strategy_id = r.strategy_id
+        if strategy_params is not None:
+            r.strategy_params = strategy_params
+            r.state.strategy_params = strategy_params
+        if watch_symbols is not None:
+            r.watch_symbols = watch_symbols
+            r.state.watch_symbols = watch_symbols
+        if tick_seconds is not None:
+            r.tick_seconds = max(5, int(tick_seconds))
+            r.state.tick_seconds = r.tick_seconds
+        r.state.save()
+        return r
+
+
 def list_runners() -> list[dict]:
     out = []
     for f in STATE_DIR.glob("*.json"):
@@ -286,3 +314,33 @@ def list_runners() -> list[dict]:
         except Exception:
             pass
     return sorted(out, key=lambda d: d.get("started_at", ""), reverse=True)
+
+
+def resume_runners() -> list[str]:
+    """
+    服务启动时调用：把所有 status=running 的 state 全部拉起，返回被恢复的 account 列表。
+    调用方（web/server.py）应在 bootstrap 后调一次。
+    """
+    resumed: list[str] = []
+    for f in STATE_DIR.glob("*.json"):
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if data.get("status") != "running":
+            continue
+        account = data.get("account")
+        if not account:
+            continue
+        try:
+            start_runner(
+                account=account,
+                watch_symbols=data.get("watch_symbols") or [],
+                strategy_id=data.get("strategy_id"),
+                strategy_params=data.get("strategy_params") or {},
+                tick_seconds=int(data.get("tick_seconds") or 15),
+            )
+            resumed.append(account)
+        except Exception:
+            continue
+    return resumed

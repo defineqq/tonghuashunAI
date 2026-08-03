@@ -313,6 +313,30 @@ def get_portfolio(account: str):
     return port.to_dict()
 
 
+@router.delete("/portfolio/{account}", summary="删除账户（含引擎、委托、状态一并清理）")
+def delete_portfolio(account: str):
+    from paper_trade import portfolio as pfolio
+    from execution.runner import stop_runner, STATE_DIR
+    from execution.broker import ORDERS_DIR
+
+    p = pfolio.default_path(account)
+    if not p.exists():
+        raise HTTPException(404, f"账户 {account} 不存在")
+    # 先停引擎（若有）
+    stop_runner(account)
+    # 账户文件
+    p.unlink()
+    # 引擎 state
+    (STATE_DIR / f"{account}.json").unlink(missing_ok=True)
+    # 委托簿
+    orders_dir = ORDERS_DIR / account
+    if orders_dir.exists():
+        for f in orders_dir.glob("*"):
+            f.unlink(missing_ok=True)
+        orders_dir.rmdir()
+    return {"ok": True, "account": account}
+
+
 @router.post("/portfolio/new", summary="新建账户")
 def new_portfolio(req: NewPortfolioRequest):
     from paper_trade import portfolio as pfolio
@@ -324,12 +348,43 @@ def new_portfolio(req: NewPortfolioRequest):
     return {"ok": True, "path": str(p), "account": port.to_dict()}
 
 
-@router.get("/portfolio", summary="列出所有账户")
+@router.get("/portfolio", summary="列出所有账户（附余额、持仓、引擎状态）")
 def list_portfolios():
+    from paper_trade import portfolio as pfolio
+    from execution.runner import RunnerState
+
     root = LOGS_DIR / "portfolio"
     if not root.exists():
         return {"accounts": []}
-    return {"accounts": [f.stem for f in root.glob("*.json")]}
+
+    items = []
+    for f in sorted(root.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+        try:
+            port = pfolio.Portfolio.load(f)
+        except Exception:
+            continue
+        total = port.cash + sum(
+            p.shares * (p.last_price or p.avg_cost) for p in port.positions.values()
+        )
+        pnl_pct = ((total - port.initial_cash) / port.initial_cash * 100) if port.initial_cash else 0.0
+        state = RunnerState.load(port.account_id)
+        items.append({
+            "account_id": port.account_id,
+            "initial_cash": port.initial_cash,
+            "cash": round(port.cash, 2),
+            "total_value": round(total, 2),
+            "pnl_pct": round(pnl_pct, 2),
+            "n_positions": len(port.positions),
+            "n_trades": len(port.trades),
+            "updated_at": datetime.fromtimestamp(f.stat().st_mtime).isoformat(timespec="seconds"),
+            "engine": {
+                "status": state.status if state else "never_started",
+                "strategy_id": state.strategy_id if state else None,
+                "tick_seconds": state.tick_seconds if state else None,
+                "last_tick_at": state.last_tick_at if state else None,
+            },
+        })
+    return {"accounts": items}
 
 
 # ================ 股票池 =================
@@ -1407,6 +1462,29 @@ def live_start(req: LiveStartRequest):
     )
     return {"account": r.account, "status": r.state.status,
             "started_at": r.state.started_at}
+
+
+class LiveUpdateRequest(BaseModel):
+    strategy_id: Optional[str] = Field(None, description="新策略 id；空串 = 清空策略只走手动下单")
+    strategy_params: Optional[dict] = None
+    watch_symbols: Optional[list[str]] = None
+    tick_seconds: Optional[int] = None
+
+
+@router.post("/live/{account}/update", summary="热更新引擎的策略/池子/tick，不需要停引擎")
+def live_update(account: str, req: LiveUpdateRequest):
+    from execution.runner import update_runner
+    r = update_runner(
+        account=account,
+        strategy_id=req.strategy_id,
+        strategy_params=req.strategy_params,
+        watch_symbols=req.watch_symbols,
+        tick_seconds=req.tick_seconds,
+    )
+    if r is None:
+        raise HTTPException(404, f"引擎 {account} 未在运行，请先启动")
+    return {"account": account, "strategy_id": r.strategy_id,
+            "watch_symbols": r.watch_symbols, "tick_seconds": r.tick_seconds}
 
 
 @router.post("/live/{account}/stop", summary="停止实时模拟盘 runner")

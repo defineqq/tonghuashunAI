@@ -69,6 +69,15 @@ try:
 except Exception as e:
     print(f"⚠️  策略加载失败: {e}")
 
+# 启动时恢复上次跑着的实时引擎（用户重启不用手动逐个再启动）
+try:
+    from execution.runner import resume_runners
+    _resumed = resume_runners()
+    if _resumed:
+        print(f"✅  自动恢复实时引擎: {', '.join(_resumed)}")
+except Exception as e:
+    print(f"⚠️  引擎恢复失败: {e}")
+
 
 app = FastAPI(
     title="tonghuashunAI",
