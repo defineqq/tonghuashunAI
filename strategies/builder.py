@@ -261,8 +261,30 @@ INDICATORS: dict[str, dict[str, Any]] = {
         "label": "涨跌停",
         "params": [],
         "ops": [
-            {"name": "up",   "label": "涨停（涨幅 ≥ 9.5%）", "value_type": "none"},
-            {"name": "down", "label": "跌停（跌幅 ≥ 9.5%）", "value_type": "none"},
+            {"name": "up",   "label": "当日涨停（涨幅 ≥ 9.5%）", "value_type": "none"},
+            {"name": "down", "label": "当日跌停（跌幅 ≥ 9.5%）", "value_type": "none"},
+            # 打板/游资策略必需：前 N 日涨停
+            {"name": "prev_up", "label": "前 N 日出现过涨停（N=天数）", "value_type": "number", "value_default": 1},
+            {"name": "prev_down", "label": "前 N 日出现过跌停", "value_type": "number", "value_default": 1},
+            {"name": "yesterday_up", "label": "昨日涨停（今日不必涨停）", "value_type": "none"},
+            {"name": "yesterday_down", "label": "昨日跌停", "value_type": "none"},
+            {"name": "consec_up", "label": "连续 N 日涨停（连板）", "value_type": "number", "value_default": 2},
+        ],
+    },
+    "REL_PRICE": {
+        "label": "价格 vs 前 N 日收盘",
+        "params": [
+            {"name": "n", "label": "回看天数（前 N 日）", "type": "int", "default": 1, "min": 1, "max": 30},
+        ],
+        "ops": [
+            {"name": "open_below_close_pct", "label": "今日开盘价 / 前 N 日收盘价 - 1 小于 %",
+             "value_type": "number", "value_default": -3.0},
+            {"name": "open_above_close_pct", "label": "今日开盘价 / 前 N 日收盘价 - 1 大于 %",
+             "value_type": "number", "value_default": 3.0},
+            {"name": "close_below_close_pct", "label": "今日收盘 / 前 N 日收盘 - 1 小于 %",
+             "value_type": "number", "value_default": -3.0},
+            {"name": "close_above_close_pct", "label": "今日收盘 / 前 N 日收盘 - 1 大于 %",
+             "value_type": "number", "value_default": 3.0},
         ],
     },
     # ---- ATR：波动率 & 止损用 ----
@@ -410,6 +432,7 @@ def _eval_rule(bars: pd.DataFrame, rule: dict) -> pd.Series:
     value = rule.get("value")
 
     close = bars["close"]
+    open_ = bars.get("open", close)
     high  = bars.get("high", close)
     low   = bars.get("low", close)
     vol   = bars.get("volume", pd.Series(0, index=close.index))
@@ -567,15 +590,45 @@ def _eval_rule(bars: pd.DataFrame, rule: dict) -> pd.Series:
 
     elif ind == "GAP":
         prev_close = close.shift()
-        open_ = bars.get("open", close)
         gap_pct = (open_ - prev_close) / prev_close.replace(0, 1e-9) * 100
         if op == "up>":   return gap_pct >  float(value)
         if op == "down>": return gap_pct < -float(value)
 
     elif ind == "LIMIT":
         pct = _pct_change_col(bars)
-        if op == "up":   return pct >=  9.5
-        if op == "down": return pct <= -9.5
+        is_up = pct >= 9.5
+        is_down = pct <= -9.5
+        if op == "up":   return is_up
+        if op == "down": return is_down
+        if op == "yesterday_up":
+            return is_up.shift(1, fill_value=False).astype(bool)
+        if op == "yesterday_down":
+            return is_down.shift(1, fill_value=False).astype(bool)
+        if op == "prev_up":
+            # 前 N 日（不含今日）出现过涨停
+            n = int(value or 1)
+            # rolling(n).max().shift(1) 表示 [i-n, i-1] 窗口
+            has_up = is_up.astype(int).rolling(n).max().shift(1).fillna(0).astype(bool)
+            return has_up
+        if op == "prev_down":
+            n = int(value or 1)
+            has_dn = is_down.astype(int).rolling(n).max().shift(1).fillna(0).astype(bool)
+            return has_dn
+        if op == "consec_up":
+            # 连续 N 日涨停（含今日）
+            n = int(value or 2)
+            return is_up.astype(int).rolling(n).min().fillna(0).astype(bool)
+
+    elif ind == "REL_PRICE":
+        n = int(ps.get("n", 1))
+        prev_close = close.shift(n)
+        pct = (open_ if op.startswith("open_") else close) / prev_close - 1
+        pct_pct = pct * 100
+        v = float(value)
+        if op.endswith("below_close_pct"):
+            return pct_pct < v
+        if op.endswith("above_close_pct"):
+            return pct_pct > v
 
     elif ind == "CHIP":
         # 用 VWAP 序列近似筹码分布：每天一个 VWAP，看 N 日窗口内各天 VWAP 相对今日价的分布

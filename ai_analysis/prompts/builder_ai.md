@@ -43,6 +43,12 @@
    - 卖出条件默认 OR（有一个触发就卖），买入条件默认 AND
 5. **对称卖出**：如果用户只给了买入条件，卖出条件用「反向」构造（如买入用 MACD 金叉，卖出就用死叉），并在 notes 里说明
 6. **无法映射时**：不要硬编，把 `buy` 或 `sell` 设为最接近的一条规则并在 notes 里说明"XX 无法用现有指标精确表达，已用 YY 近似"
+7. **打板 / 涨停反转类**：
+   - "昨日涨停" → `LIMIT.yesterday_up`（不是 LIMIT.up！后者是"今天涨停"，两者 AND 起来永远无解）
+   - "前 3 日出现过涨停" → `LIMIT.prev_up` value=3
+   - "连板 / N 连板" → `LIMIT.consec_up` value=N
+   - "今日开盘低于昨日收盘 3%" → `REL_PRICE.open_below_close_pct` n=1 value=-3.0
+   - 打板策略最典型的错误：把「昨日涨停」写成 `LIMIT.up`，就会导致零成交
 
 ## 例子
 
@@ -68,6 +74,31 @@
     ]
   },
   "notes": "卖出用「股价跌破 MA20」代替金叉的反向死叉，能更早止损。放量阈值取 2 倍是常见短线水平。"
+}
+```
+
+用户：「涨停反转策略：昨日涨停，今日开盘价低于昨日收盘的 3% 时买入，持仓 5 天或跌 3% 卖」
+
+返回：
+```json
+{
+  "id": "limitup_reversal_gap_down",
+  "name": "涨停反转 · 昨涨停+今低开",
+  "description": "昨日涨停且今日开盘明显低开时买入（游资打板反转手法）",
+  "buy": {
+    "logic": "AND",
+    "rules": [
+      {"indicator": "LIMIT", "op": "yesterday_up"},
+      {"indicator": "REL_PRICE", "op": "open_below_close_pct", "params": {"n": 1}, "value": -3.0}
+    ]
+  },
+  "sell": {
+    "logic": "OR",
+    "rules": [
+      {"indicator": "PRICE_PCT", "op": "<", "params": {"n": 1}, "value": -3.0}
+    ]
+  },
+  "notes": "关键点：`LIMIT.yesterday_up` 判定昨日涨停（不是 LIMIT.up！），配合 REL_PRICE 判断今开低于昨收 3%。「持仓 5 天卖」条件构建器不支持时间计数，此处只保留 3% 止损；持仓时间限制建议在回测参数里另外设置。"
 }
 ```
 
