@@ -28,7 +28,13 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     if (btn.dataset.tab === 'settings') loadSettings();
     if (btn.dataset.tab === 'strategies') loadStrategiesLab();
     if (btn.dataset.tab === 'backtest') { loadBacktestStrategies(); loadBacktestHistory(); }
-    if (btn.dataset.tab === 'portfolio') { loadAgentHistory(); autoResumeRunningAgent(); loadLiveStrategies(); refreshLive(); }
+    if (btn.dataset.tab === 'portfolio') {
+      loadAgentHistory();
+      autoResumeRunningAgent();
+      loadLiveStrategies();
+      // 只有当账户名填了、切进来才尝试拉引擎状态；避免空账户名下发 404
+      if (document.getElementById('acct-name').value.trim()) refreshLive();
+    }
   });
 });
 
@@ -772,6 +778,7 @@ async function loadAccount() {
   } catch (e) {
     document.getElementById('acct-view').innerHTML = `<span class="text-amber-600">账户 <b>${name}</b> 未找到，可点"新建账户"</span>`;
   }
+  refreshLive();
 }
 window.loadAccount = loadAccount;
 
@@ -785,6 +792,7 @@ async function newAccount() {
   } catch (e) {
     alert('失败: ' + e.message);
   }
+  refreshLive();
 }
 window.newAccount = newAccount;
 
@@ -2087,7 +2095,7 @@ async function loadLiveStrategies() {
 }
 
 async function startLive() {
-  const account = document.getElementById('live-account').value.trim() || 'live_default';
+  const account = document.getElementById('acct-name').value.trim() || 'live_default';
   const tick = parseInt(document.getElementById('live-tick').value) || 15;
   const strategyId = document.getElementById('live-strategy').value || null;
   const symbols = document.getElementById('live-symbols').value
@@ -2112,7 +2120,7 @@ async function startLive() {
 window.startLive = startLive;
 
 async function stopLive() {
-  const account = document.getElementById('live-account').value.trim() || 'live_default';
+  const account = document.getElementById('acct-name').value.trim() || 'live_default';
   if (!confirm('确定停止引擎？未成交的委托保留，可稍后重新启动。')) return;
   try {
     await API(`/live/${account}/stop`, { method: 'POST' });
@@ -2133,23 +2141,34 @@ function startLivePolling() {
 }
 
 async function refreshLive() {
-  const account = document.getElementById('live-account').value.trim() || 'live_default';
+  const account = document.getElementById('acct-name').value.trim();
   const view = document.getElementById('live-view');
   const badge = document.getElementById('live-status-badge');
   const stopBtn = document.getElementById('live-stop-btn');
   const startBtn = document.getElementById('live-start-btn');
+  if (!account) {
+    view.innerHTML = '';
+    badge.classList.add('hidden');
+    return;
+  }
   try {
     const r = await API(`/live/${account}`);
     const s = r.state;
+    // 只要账户有 state 或有委托，就显示徽章
+    const hasEngine = !!s || (r.orders && r.orders.length > 0);
+    badge.classList.toggle('hidden', !hasEngine);
     if (s && s.status === 'running') {
-      badge.textContent = `▶ 运行中 · tick=${s.tick_seconds}s`;
-      badge.className = 'ml-auto text-[11px] px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200';
+      badge.textContent = `⚡ 引擎运行中 · tick=${s.tick_seconds}s`;
+      badge.className = 'ml-2 text-[11px] px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200';
       stopBtn.classList.remove('hidden');
       startBtn.textContent = '重新启动';
       if (!_livePollTimer) startLivePolling();
+    } else if (hasEngine) {
+      badge.textContent = s ? `⏹ 引擎 ${s.status}` : '⏹ 引擎已停止';
+      badge.className = 'ml-2 text-[11px] px-2 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200';
+      stopBtn.classList.add('hidden');
+      startBtn.textContent = '▶ 启动引擎';
     } else {
-      badge.textContent = s ? `⏹ ${s.status}` : '未启动';
-      badge.className = 'ml-auto text-[11px] px-2 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200';
       stopBtn.classList.add('hidden');
       startBtn.textContent = '▶ 启动引擎';
     }
@@ -2252,15 +2271,15 @@ async function refreshLive() {
         `<span class="text-amber-600">⚠️ ${s.error}</span>`;
     }
   } catch (e) {
-    view.innerHTML = `<div class="text-sm text-slate-500 py-4">尚无实盘数据（先启动引擎或手动下单）</div>`;
-    badge.textContent = '未启动';
-    badge.className = 'ml-auto text-[11px] px-2 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200';
+    // 没有实时引擎数据不视作错误：说明这个账户只用日频/手动模式，静默不显示
+    view.innerHTML = '';
+    badge.classList.add('hidden');
   }
 }
 window.refreshLive = refreshLive;
 
 window.cancelLiveOrder = async function(orderId) {
-  const account = document.getElementById('live-account').value.trim() || 'live_default';
+  const account = document.getElementById('acct-name').value.trim() || 'live_default';
   try {
     await API(`/live/order/${orderId}/cancel?account=${encodeURIComponent(account)}`, { method: 'POST' });
     refreshLive();
@@ -2275,7 +2294,7 @@ window.closeLiveOrderModal = function() {
 };
 
 window.submitLiveOrder = async function() {
-  const account = document.getElementById('live-account').value.trim() || 'live_default';
+  const account = document.getElementById('acct-name').value.trim() || 'live_default';
   const body = {
     account,
     symbol: document.getElementById('lo-symbol').value.trim(),
