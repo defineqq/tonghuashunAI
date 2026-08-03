@@ -1,0 +1,79 @@
+id: banzhuan_limit_up
+name: 涨停板打板（游资龙头战法）
+description: 捕捉放量涨停的连板龙头股，尾盘确认涨停后买入，次日高开或未能持续涨停时卖出
+buy:
+  logic: AND
+  rules:
+  - indicator: LIMIT
+    op: up
+    params: {}
+  - indicator: VOLUME
+    op: surge
+    params:
+      n: 20
+    value: 3.0
+  - indicator: HIGH_LOW_N
+    op: new_high
+    params:
+      n: 5
+  - indicator: MA
+    op: price_above
+    params:
+      fast: 5
+      slow: 10
+  - indicator: MARKET_CAP
+    op: '>'
+    params: {}
+    value: 50
+  - indicator: MARKET_CAP
+    op: <
+    params: {}
+    value: 500
+sell:
+  logic: OR
+  rules:
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 1
+    value: 3.0
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 1
+    value: -5.0
+  - indicator: CONSEC
+    op: dn>=
+    params: {}
+    value: 2
+  - indicator: HIGH_LOW_N
+    op: new_low
+    params:
+      n: 3
+notes: '【买入条件映射说明】
+
+  1. 涨停板：使用 LIMIT.up（涨幅≥9.5%）精确匹配；
+
+  2. 放量涨停：VOLUME.surge n=20，倍数3.0，即当日量为20日均量3倍以上；
+
+  3. 连板条件（3日内有涨停）：现有指标目录无法直接检测「过去N日内曾涨停」，用 HIGH_LOW_N.new_high n=5 近似代替，表示股价创近5日新高，说明近期强势，请在系统外人工辅助过滤真实连板股；
+
+  4. 股价在5日、10日均线之上：MA.price_above params fast=5, slow=10，表示股价高于10日线，5日线通常也在10日线之上时隐含满足，如需严格验证5日线可另加一条
+  MA.price_above fast=5, slow=5（等效当日价>MA5）；
+
+  5. 市值50亿-500亿：用 MARKET_CAP.> value=50 和 MARKET_CAP.< value=500 双重约束；
+
+
+  【卖出条件映射说明】
+
+  1. 次日高开3%以上卖出：用 PRICE_PCT.> n=1 value=3.0，即当日相对前日涨幅超3%触发卖出（近似高开高走场景）；
+
+  2. 跌幅超5%止损：PRICE_PCT.< n=1 value=-5.0；
+
+  3. 3个交易日未再涨停强制止损：无法精确检测「N日内未涨停」，用 CONSEC.dn>= value=2（连续2根阴线）和 HIGH_LOW_N.new_low
+  n=3（3日新低）近似表达趋势走弱，建议结合人工纪律执行3日强制止损规则；
+
+  4. 平开不涨停收盘卖：无法用现有指标直接建模「当日收盘前未涨停则卖出」，建议交易员盘中手动执行；
+
+
+  【资金管理】单只仓位≤20%、最多5只为执行层面规则，现有策略 JSON 不支持仓位参数，需在交易执行模块另行设置。'

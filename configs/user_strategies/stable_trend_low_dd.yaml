@@ -1,0 +1,62 @@
+id: stable_trend_low_dd
+name: 低回撤稳健趋势策略
+description: 股价在MA20/MA60之上、RSI处于中性区间、量能放大时买入，跌破MA20或RSI超买时卖出
+buy:
+  logic: AND
+  rules:
+  - indicator: MA
+    op: price_above
+    params:
+      fast: 20
+      slow: 60
+  - indicator: MA
+    op: cross_up
+    params:
+      fast: 20
+      slow: 60
+  - indicator: MA_ARRANGE
+    op: bull
+    params:
+      short: 5
+      mid: 20
+      long: 60
+  - indicator: RSI
+    op: cross_up
+    params:
+      n: 14
+    value: 45
+  - indicator: RSI
+    op: <
+    params:
+      n: 14
+    value: 70
+  - indicator: VOLUME_RATIO
+    op: '>'
+    params:
+      n: 20
+    value: 1.5
+sell:
+  logic: OR
+  rules:
+  - indicator: MA
+    op: price_below
+    params:
+      fast: 20
+      slow: 60
+  - indicator: RSI
+    op: cross_down
+    params:
+      n: 14
+    value: 75
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 20
+    value: -3.0
+notes: 【买入条件说明】① 'price_above'(fast=20,slow=60) 表示股价在MA60之上，同时隐含MA20在MA60之上；② 'cross_up'(fast=20,slow=60)
+  对应「收盘价上穿MA20且MA20在MA60之上」的买入信号，用MA20金叉MA60近似；③ MA_ARRANGE.bull(5/20/60) 确认多头排列（对应MA20/MA60斜率向上的意图，现有指标无法直接检测斜率，以多头排列近似）；④
+  RSI cross_up 45 对应「RSI从40以下反弹至45以上」；⑤ RSI < 70 确保未超买；⑥ VOLUME_RATIO > 1.5 对应「成交量较5日均量放大1.5倍以上」（VOLUME_RATIO
+  = 近5日均量/近N日均量，N=20）。【卖出条件说明】① 股价跌破MA20止损；② RSI下穿75触发减仓（现有指标无法做「减仓一半」，只能做全仓卖出信号，已在此说明）；③
+  PRICE_PCT近20日跌幅超过3%对应单股止损。【无法精确表达的条件】1. MA20/MA60斜率为正：无斜率指标，已用MA_ARRANGE.bull近似；2.
+  近10日最大回撤<5%：无最大回撤指标，已用PRICE_PCT近20日跌幅<-3%部分近似止损；3. 盈利超15%后的移动止盈（跌破最高点8%）：无移动止盈指标，建议在交易系统层面单独设置追踪止损；4.
+  持股超20日且收益为负清仓：无持仓天数指标，无法建模；5. 仓位控制（单股≤8%，最多10只）：属于资金管理层面，条件构建器不支持，需在执行层单独配置；6. 大盘跌幅>2%停止买入、大盘MA5<MA20只减仓：属于市场环境过滤，当前指标库不支持跨标的（大盘）条件，建议单独建立沪深300的信号过滤器。

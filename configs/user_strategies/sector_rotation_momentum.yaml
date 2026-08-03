@@ -1,0 +1,52 @@
+id: sector_rotation_momentum
+name: 板块轮动动量策略
+description: 每周选取近20日强势股，要求股价站上均线、放量、RSI强势且涨幅超10%，跌破10日线或持仓超10日卖出
+buy:
+  logic: AND
+  rules:
+  - indicator: MA
+    op: price_above
+    params:
+      fast: 10
+      slow: 20
+  - indicator: STAY_MA
+    op: above
+    params:
+      n: 10
+      days: 1
+  - indicator: VOLUME_RATIO
+    op: '>'
+    params:
+      n: 60
+    value: 1.5
+  - indicator: RSI
+    op: '>'
+    params:
+      n: 14
+    value: 50
+  - indicator: RSI
+    op: <
+    params:
+      n: 14
+    value: 80
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 20
+    value: 10.0
+sell:
+  logic: OR
+  rules:
+  - indicator: MA
+    op: price_below
+    params:
+      fast: 10
+      slow: 20
+  - indicator: CONSEC
+    op: dn>=
+    params: {}
+    value: 3
+notes: 1) 买入条件全部AND：MA price_above 要求股价同时高于MA10和MA20慢线（params中fast=10, slow=20，price_above判断高于慢线即MA20，另用STAY_MA
+  n=10近似'站上10日线'）；2) VOLUME_RATIO用n=60来计算近5日均量/近60日均量>1.5，符合'近5日均量是60日均量1.5倍以上'；3)
+  RSI(14)用两条规则夹住50-80区间；4) PRICE_PCT近20日涨幅>10%；5) 卖出：股价跌破MA10用price_below(fast=10,slow=20)触发，持仓超10日无法用现有指标直接表达，已用'连续3根阴线'作近似替代，实际持仓时间限制需在交易系统层面另行设置；6)
+  资金管理（等权重、单股不超8%）属于仓位管理逻辑，无法在条件构建器指标层面表达，需在组合管理模块配置。

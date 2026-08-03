@@ -1,0 +1,81 @@
+id: low_dd_trend_v3
+name: 低回撤趋势跟踪策略
+description: 均线多头排列+MACD零轴上方金叉+温和量能+RSI中性区买入，任一趋势破坏信号触发卖出
+buy:
+  logic: AND
+  rules:
+  - indicator: MA_ARRANGE
+    op: bull
+    params:
+      short: 5
+      mid: 10
+      long: 20
+  - indicator: MACD
+    op: dif_above_zero
+    params:
+      fast: 12
+      slow: 26
+      signal: 9
+  - indicator: MACD
+    op: golden_cross
+    params:
+      fast: 12
+      slow: 26
+      signal: 9
+  - indicator: VOLUME
+    op: surge
+    params:
+      n: 10
+    value: 0.8
+  - indicator: RSI
+    op: cross_up
+    params:
+      n: 14
+    value: 40
+  - indicator: RSI
+    op: <
+    params:
+      n: 14
+    value: 70
+sell:
+  logic: OR
+  rules:
+  - indicator: MA
+    op: price_below
+    params:
+      fast: 5
+      slow: 10
+  - indicator: MACD
+    op: death_cross
+    params:
+      fast: 12
+      slow: 26
+      signal: 9
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 1
+    value: -3.0
+  - indicator: RSI
+    op: cross_down
+    params:
+      n: 14
+    value: 75
+notes: '1. 均线多头排列用 MA_ARRANGE.bull 并将 mid 设为 10，实现 5>10>20 的三线排列要求。
+
+  2. 买入条件中 MACD 同时要求 golden_cross（金叉）与 dif_above_zero（DIF在零轴上方），两条规则共同约束，确保趋势强度。
+
+  3. ''20日均线斜率为正''无法用现有指标直接计算斜率，已用 MA_ARRANGE.bull（多头排列隐含中长期均线向上）近似表达；若需更精确可额外观察 MA.price_above
+  辅助判断。
+
+  4. 买入量能条件''大于10日均量的0.8倍''用 VOLUME.surge value=0.8 表达，即当日量/N日均量 > 0.8，满足基本流动性要求。
+
+  5. RSI 40-70 区间用两条规则实现：cross_up 40（RSI上穿40，确认已脱离弱势）+ op ''<'' 70（RSI尚未超买）。
+
+  6. 卖出条件中''跌破10日均线''用 MA.price_below(fast=5, slow=10) 中的 slow=10 代理，即股价低于10日均线。
+
+  7. ''持仓亏损超过3%''用 PRICE_PCT.< value=-3.0 近似为当日跌幅超3%的止损触发，注意该指标为价格涨跌幅而非持仓成本计算，实际持仓止损需交易系统层面配合实现，已在此做最近似映射。
+
+  8. RSI超买卖出用 cross_down 75（RSI下穿75），相比直接''>''更能捕捉超买后回落的卖点。
+
+  9. 仓位管理（单票10%上限、最多8只、每次10%资金）属于资金管理层面，当前条件构建器不支持仓位参数，需在交易系统层另行配置。'

@@ -186,9 +186,12 @@ class Portfolio:
                                   fee=fee, reason=reason))
 
 
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
 def default_path(account_id: str) -> Path:
-    """账户文件默认路径：logs/portfolio/{account_id}.json"""
-    return Path("logs") / "portfolio" / f"{account_id}.json"
+    """账户文件默认路径：<项目根>/logs/portfolio/{account_id}.json"""
+    return _PROJECT_ROOT / "logs" / "portfolio" / f"{account_id}.json"
 
 
 def load_or_create(account_id: str, initial_cash: float = 100_000.0) -> Portfolio:

@@ -1,0 +1,28 @@
+id: limitup_reversal_wrap
+name: 涨停反转策略
+description: 前一日涨停、次日开盘回落时买入，持有3日收盘卖出或跌幅超5%止损
+buy:
+  logic: AND
+  rules:
+  - indicator: LIMIT
+    op: up
+    params: {}
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 1
+    value: -0.5
+sell:
+  logic: OR
+  rules:
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 3
+    value: -5.0
+  - indicator: CONSEC
+    op: up>=
+    params: {}
+    value: 3
+notes: 买入条件：LIMIT.up 捕捉「昨日涨停」信号（条件选股器中该指标取前一日数据），PRICE_PCT.<(-0.5) 近似表达「今日开盘低于涨停价（即开盘回落）」——由于现有指标库无法直接比较开盘价与前日涨停价，此处用当日短周期跌幅>0.5%作为「开盘回落」的近似判断，实际使用时请在回测框架层面补充开盘价过滤逻辑。卖出条件：PRICE_PCT.<(-5.0)
+  实现持有期间跌幅超5%的止损；持有3日收盘卖出属于时间维度的强制平仓，现有指标库无「持有N日后卖出」指标，已用 CONSEC.up>=(3) 近似（连续3根阳线视为短线目标达成），建议在策略执行层另行维护持仓天数计数器实现精确的T+3卖出。仓位管理（单股≤10%、最多10只）属于资金管理层面，条件构建器无对应指标，需在回测/实盘框架的仓位管理模块中配置。

@@ -1,0 +1,101 @@
+id: trend_low_dd_v2
+name: 趋势跟踪+低回撤组合策略
+description: 均线多头排列+MACD金叉+温和放量+RSI中性区买入，跌破均线或超买或止损卖出，追求趋势跟踪与低回撤平衡
+buy:
+  logic: AND
+  rules:
+  - indicator: MA
+    op: price_above
+    params:
+      fast: 5
+      slow: 20
+  - indicator: MA
+    op: cross_up
+    params:
+      fast: 5
+      slow: 20
+  - indicator: MACD
+    op: golden_cross
+    params:
+      fast: 12
+      slow: 26
+      signal: 9
+  - indicator: VOLUME
+    op: surge
+    params:
+      n: 10
+    value: 1.2
+  - indicator: RSI
+    op: cross_up
+    params:
+      n: 14
+    value: 40
+  - indicator: RSI
+    op: <
+    params:
+      n: 14
+    value: 70
+  - indicator: MA_ARRANGE
+    op: bull
+    params:
+      short: 5
+      mid: 20
+      long: 60
+sell:
+  logic: OR
+  rules:
+  - indicator: MA
+    op: price_below
+    params:
+      fast: 5
+      slow: 20
+  - indicator: MA
+    op: cross_down
+    params:
+      fast: 5
+      slow: 20
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 20
+    value: -5.0
+  - indicator: RSI
+    op: '>'
+    params:
+      n: 14
+    value: 80
+notes: '【买入条件映射说明】
+
+  1. 「股价站上20日均线」→ MA.price_above(fast=5, slow=20)，慢线即MA20；「MA20向上」现有指标无法直接判断MA斜率，已用
+  MA_ARRANGE.bull（5>20>60多头排列）近似表达中期趋势向上，并隐含MA20处于上升状态。
+
+  2. 「5日金叉20日」→ MA.cross_up(fast=5, slow=20)，标准金叉。
+
+  3. 「MACD金叉或多头排列」→ MACD.golden_cross；「柱状体为正」（DIF>DEA即金叉状态已包含此含义），现有指标无独立的「MACD柱为正」op，golden_cross已近似覆盖该语义。
+
+  4. 「当日量 > 10日均量1.2倍」→ VOLUME.surge(n=10, value=1.2)，参数n改为10对应用户描述的10日均量。
+
+  5. 「RSI在40-70之间」→ 用 RSI.cross_up(value=40) 捕捉RSI从低位回升突破40的时机，同时加 RSI.<(value=70)
+  排除超买。注意RSI.cross_up为上穿信号，若持续持有需配合RSI.<70过滤，两者AND组合已尽量还原区间约束。
+
+  6. 「股价在60日均线上方」→ MA_ARRANGE.bull(short=5, mid=20, long=60) 已隐含股价>MA5>MA20>MA60，与条件6高度吻合。
+
+
+  【卖出条件映射说明】
+
+  1. 「跌破MA20」→ MA.price_below，最直接止损信号。
+
+  2. 「5/20死叉」→ MA.cross_down，趋势转空信号。
+
+  3. 「从买入价跌超5%」→ PRICE_PCT.<(n=20, value=-5.0)，以近20日涨跌幅<-5%近似；注意该指标为近N日累计涨跌幅，无法精确追踪「从买入价」，已尽量近似，建议配合系统止损功能使用。
+
+  4. 「从最高价回撤超8%」→ 现有指标无法追踪持仓最高价动态回撤，此条件无法用现有指标精确表达，已在notes中说明，建议在交易系统层面单独实现追踪止损。
+
+  5. 「RSI>80超买」→ RSI.>(value=80)，标准超买卖出。
+
+
+  【仓位/过滤说明】
+
+  - 仓位管理（单票10%、最多10只、每次8%）、排除ST、近30日涨幅>50%过滤、相对强弱排名等属于选股/风控层逻辑，不在条件构建器的指标规则范围内，需在上层选股框架或资金管理模块中配置。
+
+  - 「近30日涨幅超50%」可近似用 PRICE_PCT.>(n=30, value=50) 作为买入排除条件，但因本策略buy逻辑为AND，若需排除可将其改为不满足该条件的过滤层规则。'

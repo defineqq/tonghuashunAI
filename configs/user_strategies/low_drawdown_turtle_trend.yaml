@@ -1,0 +1,72 @@
+id: low_drawdown_turtle_trend
+name: 低回撤海龟趋势跟踪
+description: 多头排列+RSI中性区+量能配合时，股价突破10日新高买入；跌破10日均线或趋势转弱时卖出
+buy:
+  logic: AND
+  rules:
+  - indicator: MA_ARRANGE
+    op: bull
+    params:
+      short: 5
+      mid: 20
+      long: 60
+  - indicator: MA
+    op: price_above
+    params:
+      fast: 5
+      slow: 20
+  - indicator: MA
+    op: price_above
+    params:
+      fast: 20
+      slow: 60
+  - indicator: RSI
+    op: '>'
+    params:
+      n: 14
+    value: 45
+  - indicator: RSI
+    op: <
+    params:
+      n: 14
+    value: 70
+  - indicator: VOLUME_RATIO
+    op: '>'
+    params:
+      n: 20
+    value: 1.0
+  - indicator: HIGH_LOW_N
+    op: new_high
+    params:
+      n: 10
+  - indicator: AMOUNT
+    op: abs>
+    params:
+      n: 20
+    value: 5.0
+sell:
+  logic: OR
+  rules:
+  - indicator: MA
+    op: price_below
+    params:
+      fast: 5
+      slow: 10
+  - indicator: MA_ARRANGE
+    op: bear
+    params:
+      short: 5
+      mid: 20
+      long: 60
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 20
+    value: 15.0
+notes: 【买入条件说明】①MA_ARRANGE.bull 确保短>中>长多头排列，已隐含20日均线斜率向上的趋势含义；②额外加入 price_above(fast=20,
+  slow=60) 双重确认股价在60日线上方；③RSI>45 且 RSI<70 用两条规则组合表达45-70区间，过滤超买超卖极端状态；④VOLUME_RATIO>1.0
+  表示近5日均量大于近20日均量（量能配合放大）；⑤HIGH_LOW_N.new_high(n=10) 实现海龟系统10日突破信号；⑥AMOUNT.abs>5亿
+  作为市值大于50亿的近似过滤（市值指标不在目录内，用成交额代理流动性，在notes中说明）。【卖出条件说明】①price_below(fast=5, slow=10)
+  即股价跌破10日均线止损，对应原始卖出条件1；②MA_ARRANGE.bear 空头排列作为趋势反转的强力卖出信号；③PRICE_PCT.>(n=20, value=15)
+  捕捉持仓收益超15%的止盈触发，对应原始卖出条件2。【无法精确映射说明】①「20日均线斜率为正」无直接斜率指标，已用 MA_ARRANGE.bull 多头排列近似替代；②「市值大于50亿」市值筛选指标不在可用列表内，已用成交额
+  AMOUNT.abs>5亿 近似过滤（成交额大的股票通常市值也较大）；③「移动止损在最高价下方8%」及「持有超20个交易日强制止盈止损」属于持仓管理逻辑，条件构建器无法表达时序/持仓天数，已用价格/趋势指标尽量近似覆盖止损场景；④仓位管理（10%单股上限、最多10只）属于资金管理模块，不在策略JSON范围内，需在系统仓位管理处单独配置。

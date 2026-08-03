@@ -1,0 +1,36 @@
+id: longtou_limitup
+name: 龙头涨停次日高开战法
+description: 近5日内出现过涨停的龙头股，次日高开超1%且放量1.5倍买入，持有3日或跌破5日线止损卖出
+buy:
+  logic: AND
+  rules:
+  - indicator: HIGH_LOW_N
+    op: new_high
+    params:
+      n: 5
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 1
+    value: 1.0
+  - indicator: VOLUME
+    op: surge
+    params:
+      n: 20
+    value: 1.5
+sell:
+  logic: OR
+  rules:
+  - indicator: CONSEC
+    op: up>=
+    params: {}
+    value: 3
+  - indicator: MA
+    op: price_below
+    params:
+      fast: 5
+      slow: 5
+notes: 买入条件说明：1）'近5日有过涨停'无法用现有指标精确表达涨停历史，已用 HIGH_LOW_N(n=5).new_high（近5日创新高）近似，能筛出近期强势股；2）'当日高开超1%'用
+  PRICE_PCT(n=1).> value=1.0 近似表达当日涨幅超1%（开盘涨幅与日内涨幅存在差异，现有指标无法精确取开盘价与昨收比，已用当日涨幅代替）；3）放量1.5倍用
+  VOLUME.surge value=1.5 表达。卖出条件说明：1）'持有满3个交易日'现有指标无法精确表达持仓日计数，已用 CONSEC.up>= value=3（连续3根阳线）近似，表示强势延续结束信号；2）跌破5日均线用
+  MA.price_below(fast=5, slow=5) 表达，此处 slow=5 即5日均线。建议在实盘中结合持仓日期手动控制3日止盈逻辑。

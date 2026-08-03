@@ -67,8 +67,9 @@ def load_user_strategies() -> None:
     from pathlib import Path
     import yaml
 
+    project_root = Path(__file__).resolve().parents[1]
     # YAML 定义（条件构建器产出）
-    yaml_dir = Path("configs/user_strategies")
+    yaml_dir = project_root / "configs" / "user_strategies"
     if yaml_dir.exists():
         from strategies.builder import BuilderStrategy
         for f in yaml_dir.glob("*.yaml"):
@@ -80,7 +81,7 @@ def load_user_strategies() -> None:
                 print(f"加载 YAML 策略失败 {f.name}: {e}")
 
     # Python 用户策略
-    py_dir = Path("strategies/user_defined")
+    py_dir = project_root / "strategies" / "user_defined"
     if py_dir.exists():
         from strategies.user_defined_loader import load_user_python
         for f in py_dir.glob("*.py"):

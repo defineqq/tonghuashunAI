@@ -1,0 +1,62 @@
+id: trend_ma_macd_volume
+name: 趋势跟踪+止损保护策略
+description: 均线金叉+MACD多头+放量确认买入，死叉/跌破均线/超买任一触发卖出
+buy:
+  logic: AND
+  rules:
+  - indicator: MA
+    op: cross_up
+    params:
+      fast: 5
+      slow: 10
+  - indicator: MA
+    op: cross_up
+    params:
+      fast: 10
+      slow: 20
+  - indicator: MACD
+    op: golden_cross
+    params:
+      fast: 12
+      slow: 26
+      signal: 9
+  - indicator: VOLUME
+    op: surge
+    params:
+      n: 20
+    value: 1.2
+  - indicator: RSI
+    op: '>'
+    params:
+      n: 14
+    value: 40
+  - indicator: RSI
+    op: <
+    params:
+      n: 14
+    value: 70
+sell:
+  logic: OR
+  rules:
+  - indicator: MA
+    op: cross_down
+    params:
+      fast: 5
+      slow: 10
+  - indicator: MA
+    op: price_below
+    params:
+      fast: 5
+      slow: 20
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 1
+    value: -3.0
+  - indicator: RSI
+    op: '>'
+    params:
+      n: 14
+    value: 75
+notes: 买入条件说明：①MA(5)上穿MA(10)为短期金叉；②MA(10)上穿MA(20)确认中期趋势向上，两个cross_up规则分别建模；③MACD金叉用golden_cross代理「柱状图>0且处于多头区间」，现有指标无法直接判断柱状图数值，用金叉状态近似，已是最接近映射；④放量用VOLUME.surge阈值1.2倍（低于常规2倍，符合用户1.2倍要求）；⑤RSI
+  40-70区间用两条规则AND组合实现。卖出条件说明：①MA(5)下穿MA(10)死叉；②股价跌破MA(20)用price_below；③从买入价下跌超3%用PRICE_PCT.<，n=1表示当日涨跌幅，value=-3，注意该指标为区间涨跌幅近似止损，无法精确追踪买入成本价，已是现有指标最近似表达；④RSI>75超买卖出。仓位管理（每只≤10%、最多10只、每次10%）属于资金管理层面，条件构建器暂不支持，请在交易系统的仓位管理模块中手动配置。

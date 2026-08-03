@@ -1,0 +1,55 @@
+id: youzi_pullback_buy
+name: 游资强势股高抛低吸
+description: 近5日内出现过涨停的强势股，在缩量回调后企稳于5日线上方、MACD多头状态时买入，涨10%止盈或跌5%止损
+buy:
+  logic: AND
+  rules:
+  - indicator: HIGH_LOW_N
+    op: new_high
+    params:
+      n: 5
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 3
+    value: -2.0
+  - indicator: VOLUME
+    op: shrink
+    params:
+      n: 20
+    value: 0.8
+  - indicator: MA
+    op: price_above
+    params:
+      fast: 5
+      slow: 5
+  - indicator: MACD_HIST
+    op: hist>0
+    params:
+      fast: 12
+      slow: 26
+      signal: 9
+sell:
+  logic: OR
+  rules:
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 5
+    value: 10.0
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 5
+    value: -5.0
+  - indicator: MACD_HIST
+    op: hist<0
+    params:
+      fast: 12
+      slow: 26
+      signal: 9
+notes: 【买入条件说明】① 「近5日内出现过涨停」原意是近5日内任意一天涨停，现有指标无法精确表达「N日内出现过涨停」，用 HIGH_LOW_N.new_high(n=5)（近5日创新高）近似，因为涨停股通常同时会创近期新高，但不完全等价，请注意。②
+  「回调幅度2%-8%」需要相对涨停日计算，现有指标只有 PRICE_PCT（近N日涨跌幅），用 PRICE_PCT.<(n=3, value=-2.0) 表示近3日跌幅超过2%来近似捕捉回调，但无法精确限制上限8%，属于近似处理。③
+  缩量用 VOLUME.shrink(n=20, value=0.8) 即当日量小于20日均量的0.8倍。④ 股价在5日线之上用 MA.price_above(fast=5,
+  slow=5)，因为 slow 参数即为均线周期，此处仅判断5日线。⑤ MACD柱状图大于0用 MACD_HIST.hist>0。【卖出条件说明】① 10%止盈：PRICE_PCT.>(n=5,
+  value=10.0)，用近5日累计涨幅超过10%近似（持有后计算）。② 5%止损：PRICE_PCT.<(n=5, value=-5.0)。③ 「持有超过5个交易日强制卖出」现有指标无法表达持仓天数，已省略，建议在系统层面实现。【资金管理】「每只仓位不超过10%」属于资金管理层面，条件构建器不支持，请在交易系统中单独配置。

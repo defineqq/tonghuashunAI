@@ -1,0 +1,38 @@
+id: limitup_reversal_v3
+name: 涨停反转策略
+description: 前日涨停且今日竞价低开超2%，捕捉涨停板打开后的超跌反弹机会，持有3日或止盈10%/止损5%离场
+buy:
+  logic: AND
+  rules:
+  - indicator: LIMIT
+    op: up
+    params: {}
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 1
+    value: -2.0
+  - indicator: MARKET_CAP
+    op: <
+    params: {}
+    value: 500
+sell:
+  logic: OR
+  rules:
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 1
+    value: -5.0
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 1
+    value: 10.0
+  - indicator: CONSEC
+    op: up>=
+    params: {}
+    value: 3
+notes: 【买入条件说明】1) LIMIT.up 捕捉前一日涨停信号（涨幅≥9.5%）；2) PRICE_PCT.<（n=1，value=-2.0）近似表达今日开盘低开超2%（用当日早盘价格跌幅代理竞价低开幅度，现有指标无法精确区分开盘价与收盘价，已用日内价格跌幅近似）；3)
+  MARKET_CAP.< 500亿 筛选中小盘股票，聚焦策略描述中的中小盘反转机会。【卖出条件说明】1) PRICE_PCT.<（n=1，value=-5.0）触发止损5%；2)
+  PRICE_PCT.>（n=1，value=10.0）触发止盈10%；3) CONSEC.up>=（value=3）用连续3根阳线近似表达持有3日后离场（现有指标无「持有天数」字段，用连续阳线数量近似，实际使用时建议在平台侧配合T+3日期止盈逻辑）。【资金管理说明】每只10%仓位、最多10只股票的资金管理规则属于仓位控制层，现有指标目录中无对应字段，需在平台资金管理模块单独配置，策略JSON中无法表达，已在此说明。

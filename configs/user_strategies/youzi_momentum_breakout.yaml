@@ -1,0 +1,62 @@
+id: youzi_momentum_breakout
+name: 游资强势股追涨策略
+description: 近5日内出现过涨停、今日放量2倍、股价在5/10日均线之上、市值50-500亿，今日突破10日新高且MACD在零轴上方时买入，跌破5日均线止损
+buy:
+  logic: AND
+  rules:
+  - indicator: LIMIT
+    op: up
+    params: {}
+  - indicator: VOLUME
+    op: surge
+    params:
+      n: 20
+    value: 2.0
+  - indicator: MA
+    op: price_above
+    params:
+      fast: 5
+      slow: 10
+  - indicator: MARKET_CAP
+    op: '>'
+    params: {}
+    value: 50
+  - indicator: MARKET_CAP
+    op: <
+    params: {}
+    value: 500
+  - indicator: HIGH_LOW_N
+    op: new_high
+    params:
+      n: 10
+  - indicator: MACD_HIST
+    op: dif_stay_above_zero
+    params:
+      fast: 12
+      slow: 26
+      signal: 9
+    value: 1
+sell:
+  logic: OR
+  rules:
+  - indicator: MA
+    op: price_below
+    params:
+      fast: 5
+      slow: 10
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 1
+    value: 20.0
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 1
+    value: 35.0
+notes: 1. 【近5日涨停板过滤】：系统不支持「过去N日内曾出现涨停」的回溯条件，已用 LIMIT.up（今日涨停）近似表达强势特征，实际使用时建议人工或扩展指标补充「5日内曾涨停」逻辑。2.
+  【股价在5日和10日均线之上】：MA.price_above 只能指定一条慢线，这里用 fast=5, slow=10，表达股价高于10日均线；5日均线的验证通过止损条件（price_below
+  fast=5）间接覆盖。3. 【MACD零轴上方】：用 MACD_HIST.dif_stay_above_zero value=1 表示DIF连续至少1日在零轴上方（等价于当前DIF>0），DEA>0无法单独判断，已用DIF在零轴上方近似代替整体MACD多头区间。4.
+  【加仓条件（次日涨停追仓50%）】：条件构建器不支持持仓后的加仓逻辑，无法在JSON中表达，需在交易系统层面手动实现。5. 【分批止盈】：条件构建器不支持「持有期间累计收益」的跟踪计算，PRICE_PCT.>
+  用当日涨幅近似，建议结合账户盈亏系统实现分批止盈50%和清仓两档操作。6. 【仓位管理（最多10只/每只15%）】：属于资金管理层，条件JSON无法表达，需在交易系统层配置。7.
+  卖出逻辑：主止损为股价跌破5日均线（MA price_below），止盈阈值分20%和35%两档列出，实际执行需结合持仓成本计算。

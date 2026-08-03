@@ -1,0 +1,48 @@
+id: lianban_momentum
+name: 涨停连板追击策略（连板龙头）
+description: 连续两日涨停、放量、股价在均线上方且小市值标的，次日开盘追击，遇跌停/破10日线/持有超5日/盈利超20%则卖出
+buy:
+  logic: AND
+  rules:
+  - indicator: LIMIT
+    op: up
+    params: {}
+  - indicator: CONSEC
+    op: up>=
+    params: {}
+    value: 2
+  - indicator: VOLUME
+    op: surge
+    params:
+      n: 5
+    value: 1.5
+  - indicator: MA
+    op: price_above
+    params:
+      fast: 5
+      slow: 20
+  - indicator: MARKET_CAP
+    op: <
+    params: {}
+    value: 50
+sell:
+  logic: OR
+  rules:
+  - indicator: LIMIT
+    op: down
+    params: {}
+  - indicator: MA
+    op: price_below
+    params:
+      fast: 5
+      slow: 10
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 5
+    value: 20.0
+notes: 1. 「今日涨停」用 LIMIT.up 表达；「连续2日涨停」用 CONSEC.up>= value:2 近似（连续2根阳线含今日涨停，已由第1条限定为涨停级别阳线，实际连板语义最接近）。2.
+  放量用 VOLUME.surge n=5 value=1.5，以5日均量为基准。3. 股价在20日均线之上用 MA.price_above slow=20。4.
+  流通市值50亿以下用 MARKET_CAP.< value=50（平台以总市值代理，与流通市值存在偏差，已在此说明）。5. 卖出条件：跌停用 LIMIT.down；跌破10日线用
+  MA.price_below slow=10；盈利超20%用 PRICE_PCT.> n=5 value=20（以持有期内涨幅近似，实际持仓收益率需平台支持，此处为最接近映射）。6.
+  「持有超过5个交易日强制卖出」属于持仓时间管理，现有指标无法表达，建议在平台的「持仓天数止损」功能中单独配置，此处未能纳入 JSON。7. 次日开盘买入、10%仓位限制、最多10只持仓等资金管理规则属于执行层参数，不在条件构建器指标范畴内，请在平台的交易设置/仓位管理模块配置。

@@ -1,0 +1,79 @@
+id: composite_trend_low_dd
+name: 趋势跟踪+低回撤复合策略
+description: 均线金叉+MACD金叉+温和放量+RSI中性区间买入，死叉或MACD转负或止损卖出，同时过滤低流动性标的
+buy:
+  logic: AND
+  rules:
+  - indicator: MA
+    op: price_above
+    params:
+      fast: 5
+      slow: 20
+  - indicator: MA
+    op: cross_up
+    params:
+      fast: 5
+      slow: 20
+  - indicator: MACD
+    op: golden_cross
+    params:
+      fast: 12
+      slow: 26
+      signal: 9
+  - indicator: VOLUME
+    op: surge
+    params:
+      n: 20
+    value: 1.2
+  - indicator: RSI
+    op: cross_up
+    params:
+      n: 14
+    value: 40
+  - indicator: RSI
+    op: <
+    params:
+      n: 14
+    value: 70
+  - indicator: AMOUNT
+    op: abs>
+    params:
+      n: 20
+    value: 0.5
+sell:
+  logic: OR
+  rules:
+  - indicator: MA
+    op: cross_down
+    params:
+      fast: 5
+      slow: 20
+  - indicator: MACD
+    op: death_cross
+    params:
+      fast: 12
+      slow: 26
+      signal: 9
+  - indicator: MA
+    op: price_below
+    params:
+      fast: 5
+      slow: 20
+  - indicator: RSI
+    op: cross_down
+    params:
+      n: 14
+    value: 70
+notes: '1. 【均线斜率为正】现有指标无法直接判断均线斜率方向，已用「股价高于MA20（price_above）」近似代替，含义接近但不完全等价。
+
+  2. 【ATR止损】现有指标目录中无ATR指标，1.5倍ATR(14)的硬止损和移动止盈（最高盈利50%回撤）均无法精确表达，已在卖出条件中用「5日线跌破20日线」和「股价跌破MA20」作为趋势反转止损的近似替代，并补充MACD死叉作为辅助止损信号。建议在系统层面另行配置ATR止损模块。
+
+  3. 【RSI 40-70区间】RSI区间过滤拆为两条规则：cross_up 40（RSI由下方穿越40，确认动能恢复）+ < 70（RSI尚未超买），两者AND逻辑组合近似表达40-70区间。
+
+  4. 【温和放量1.2倍】VOLUME.surge的value设为1.2，低于常见放量标准（2倍），符合用户「温和放量」的描述。
+
+  5. 【日成交额≥5000万过滤】5000万元 = 0.5亿元，用AMOUNT.abs>（value=0.5）实现流动性过滤，排除低流动性标的。
+
+  6. 【仓位管理（10%/只、最多10只）、排除ST股票】属于系统级风控规则，条件构建器JSON层面无对应字段，需在回测/实盘系统的资金管理模块中单独配置。
+
+  7. 卖出逻辑为OR，任一条件触发即卖出，符合低回撤目标。'

@@ -1,0 +1,70 @@
+id: trend_v4_low_dd
+name: 低回撤趋势跟踪策略v4
+description: 股价在60日均线上方，MA5金叉MA20，MACD金叉确认动能，放量1.2倍以上时买入；跌破MA20、MACD死叉、RSI超买或亏损3%时卖出
+buy:
+  logic: AND
+  rules:
+  - indicator: MA
+    op: price_above
+    params:
+      fast: 5
+      slow: 60
+  - indicator: MA
+    op: cross_up
+    params:
+      fast: 5
+      slow: 20
+  - indicator: MACD
+    op: golden_cross
+    params:
+      fast: 12
+      slow: 26
+      signal: 9
+  - indicator: VOLUME
+    op: surge
+    params:
+      n: 5
+    value: 1.2
+  - indicator: RSI
+    op: cross_up
+    params:
+      n: 14
+    value: 40
+sell:
+  logic: OR
+  rules:
+  - indicator: MA
+    op: price_below
+    params:
+      fast: 5
+      slow: 20
+  - indicator: MACD
+    op: death_cross
+    params:
+      fast: 12
+      slow: 26
+      signal: 9
+  - indicator: RSI
+    op: '>'
+    params:
+      n: 14
+    value: 75
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 1
+    value: -3.0
+notes: '1. 买入条件1「股价在60日均线之上」使用 MA.price_above(fast=5, slow=60)，其中 slow=60 代表60日均线，fast=5
+  仅作辅助参数，实际判断为股价高于慢线(60日)。
+
+  2. 买入条件3「MACD柱状图为正」在现有指标中无法直接判断柱状图正负，已用 MACD.golden_cross（DIF上穿DEA，即柱状图由负转正的时刻）近似表达，可捕捉动能转正的关键节点，但无法持续判断柱状图是否仍为正值。
+
+  4. 买入条件4「成交量大于5日均量1.2倍」使用 VOLUME.surge(n=5, value=1.2)，n=5表示参照5日均量，阈值1.2倍为用户指定。
+
+  5. 买入条件5「RSI在40到70之间」现有指标无法直接表达区间条件，已用 RSI.cross_up(value=40) 近似，即RSI刚从40以下上穿40时触发，代表脱离弱势区域进入合理区间，但无法持续过滤RSI已高于70的情况，建议配合卖出条件3（RSI>75）弥补。
+
+  6. 卖出条件2「MACD柱状图由正转负」使用 MACD.death_cross 近似，死叉即柱状图转负的信号。
+
+  7. 卖出条件4「持仓亏损超过3%」使用 PRICE_PCT.<(n=1, value=-3.0)，以当日单日跌幅超过3%近似，无法精确跟踪持仓成本，建议在实盘中配合账户层面止损逻辑使用。
+
+  8. 仓位管理（每只5%、最多10只、总仓位50%）属于组合管理层面，现有 JSON 条件构建器无法表达，需在系统资金管理模块单独配置。'

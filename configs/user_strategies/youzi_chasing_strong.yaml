@@ -1,0 +1,60 @@
+id: youzi_chasing_strong
+name: 游资强势股追涨策略
+description: 昨日涨停+今日高开+放量+均线多头排列+RSI强势区间买入，多重止盈止损条件卖出
+buy:
+  logic: AND
+  rules:
+  - indicator: LIMIT
+    op: up
+    params: {}
+  - indicator: GAP
+    op: up>
+    params: {}
+    value: 0.5
+  - indicator: VOLUME_RATIO
+    op: '>'
+    params:
+      n: 20
+    value: 1.2
+  - indicator: MA_ARRANGE
+    op: bull
+    params:
+      short: 5
+      mid: 10
+      long: 20
+  - indicator: RSI
+    op: '>'
+    params:
+      n: 6
+    value: 50
+  - indicator: RSI
+    op: <
+    params:
+      n: 6
+    value: 80
+sell:
+  logic: OR
+  rules:
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 1
+    value: 9.0
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 3
+    value: -3.0
+  - indicator: RSI
+    op: '>'
+    params:
+      n: 6
+    value: 85
+  - indicator: CONSEC
+    op: dn>=
+    params: {}
+    value: 3
+notes: 【买入条件说明】①昨日涨停用 LIMIT.up 捕捉（涨幅≥9.5%）；②高开0.5%用 GAP.up> value=0.5 近似，GAP 检测今日开盘相对昨收的跳空；③开盘1小时内量>昨日全天量30%
+  在日线层面无法精确，已用 VOLUME_RATIO（今日量/N日均量>1.2）近似量能放大；④均线多头排列用 MA_ARRANGE.bull short=5/mid=10/long=20；⑤RSI(6)
+  在50-80之间用两条规则：RSI>50 AND RSI<80。【卖出条件说明】①持有当日涨幅超9%用 PRICE_PCT.> n=1 value=9.0（1日涨幅）触发止盈；②持有3日收益<2%的止损条件——现有指标无法精确表达「持有N日收益<X%」，已用「连续3日阴线」(CONSEC.dn>=3)
+  近似判断上涨动能衰竭；③跌破买入价3%止损用 PRICE_PCT.< n=3 value=-3.0（近3日跌幅超3%）近似；④RSI(6)>85 超买卖出直接映射。【仓位管理】每只不超过10%、最多持10只属于资金管理层面，条件构建器不支持仓位规则，请在交易系统或人工层面控制。

@@ -1,0 +1,34 @@
+id: board_limit_up
+name: 打板涨停追板策略
+description: 选取近5日内出现过涨停且放量的股票，追板买入，跌破5日均线或5日无新高则卖出
+buy:
+  logic: AND
+  rules:
+  - indicator: LIMIT
+    op: up
+    params: {}
+  - indicator: VOLUME
+    op: surge
+    params:
+      n: 20
+    value: 2.0
+  - indicator: TURNOVER
+    op: '>'
+    params: {}
+    value: 3.0
+sell:
+  logic: OR
+  rules:
+  - indicator: MA
+    op: price_below
+    params:
+      fast: 5
+      slow: 5
+  - indicator: HIGH_LOW_N
+    op: new_low
+    params:
+      n: 5
+notes: 1）买入条件：使用 LIMIT.up 捕捉涨停信号（当日涨幅≥9.5%），同时要求 VOLUME.surge 成交量为20日均量2倍以上确认放量，TURNOVER>3%
+  用于过滤一字板（一字板换手率极低，真实涨停换手率通常较高，此处用3%作为近似筛选，无法精确识别'非一字板开板'，已用换手率>3%近似）；2）追板逻辑（次日以涨停价买入）属于订单执行层面，条件构建器无法表达，策略触发信号仍为涨停当日，实际执行需在系统下单层处理；3）止损卖出：MA.price_below
+  中 fast=slow=5，即股价跌破5日均线触发止损；4）5日无新高止盈：用 HIGH_LOW_N.new_low n=5 近似（5日内创新低则出场），无法精确表达'持仓超过5日无新高'的时间维度条件，已用最近5日新低近似；5）仓位不超过10%属于资金管理层面，条件构建器不支持，需在风控模块单独配置；6）卖出逻辑取
+  OR，任一止损/止盈条件触发即卖出。

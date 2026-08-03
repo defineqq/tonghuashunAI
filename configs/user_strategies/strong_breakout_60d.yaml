@@ -1,0 +1,49 @@
+id: strong_breakout_60d
+name: 超强势60日突破策略
+description: 收盘价创60日新高，同时放量1.5倍、涨幅超3%、均线多头、MACD柱状图为正，多重条件共振买入；跌破20日均线或亏损超8%止损卖出
+buy:
+  logic: AND
+  rules:
+  - indicator: HIGH_LOW_N
+    op: new_high
+    params:
+      n: 60
+  - indicator: VOLUME
+    op: surge
+    params:
+      n: 20
+    value: 1.5
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 1
+    value: 3.0
+  - indicator: MA_ARRANGE
+    op: bull
+    params:
+      short: 5
+      mid: 20
+      long: 60
+  - indicator: MACD_HIST
+    op: hist>0
+    params:
+      fast: 12
+      slow: 26
+      signal: 9
+sell:
+  logic: OR
+  rules:
+  - indicator: MA
+    op: price_below
+    params:
+      fast: 5
+      slow: 20
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 20
+    value: -8.0
+notes: 买入条件说明：1）HIGH_LOW_N(n=60).new_high 精确对应60日新高突破；2）VOLUME.surge(n=20, value=1.5)
+  对应1.5倍均量放量确认；3）PRICE_PCT(n=1)>3.0 对应今日涨幅超3%（n=1表示当日涨幅）；4）MA_ARRANGE.bull(5/20/60)
+  对应收盘价在20日和60日均线之上的多头排列；5）MACD_HIST.hist>0 对应MACD柱状图为正值。卖出条件说明：1）MA.price_below(slow=20)
+  对应跌破20日均线止损；2）PRICE_PCT(n=20)<-8.0 用持仓期内最大跌幅近似替代8%止损（以买入日为基准的20日内涨跌幅），此为近似处理。持有超20日强制卖出及资金管理（每次10%仓位、最多10只）属于仓位管理规则，超出条件构建器的指标范围，需在交易系统的资金管理模块单独配置，无法在本JSON中直接表达。

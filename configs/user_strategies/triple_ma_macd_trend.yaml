@@ -1,0 +1,63 @@
+id: triple_ma_macd_trend
+name: 趋势动量低回撤策略
+description: 三均线多头排列+MACD金叉上方+温和放量+RSI适中区间买入，跌破10日线或MACD死叉或止损卖出
+buy:
+  logic: AND
+  rules:
+  - indicator: MA_ARRANGE
+    op: bull
+    params:
+      short: 5
+      mid: 10
+      long: 20
+  - indicator: MACD
+    op: dif_above_zero
+    params:
+      fast: 12
+      slow: 26
+      signal: 9
+  - indicator: VOLUME
+    op: surge
+    params:
+      n: 20
+    value: 1.2
+  - indicator: RSI
+    op: '>'
+    params:
+      n: 14
+    value: 50
+  - indicator: RSI
+    op: <
+    params:
+      n: 14
+    value: 70
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 20
+    value: 8.0
+sell:
+  logic: OR
+  rules:
+  - indicator: MA
+    op: price_below
+    params:
+      fast: 5
+      slow: 10
+  - indicator: MACD
+    op: death_cross
+    params:
+      fast: 12
+      slow: 26
+      signal: 9
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 20
+    value: -3.0
+notes: 1) 三均线多头排列用 MA_ARRANGE.bull(5/10/20) 精确表达短>中>长；2) 「MACD快线在慢线上方且柱状体为正」等价于 DIF>DEA
+  且 DIF>0，现有指标中 dif_above_zero 表示 DIF 上穿零轴，可近似代表 DIF 在零轴上方（MACD 整体偏多），无法同时精确校验柱状体实时为正，已用该指标近似；3)
+  成交量放量阈值取 1.2 倍，低于常规 2 倍，符合用户「温和放量」意图；4) RSI 50-70 区间用两条规则（>50 AND <70）共同约束；5) 「股价距20日均线涨幅不超过8%」用
+  PRICE_PCT.<(n=20, value=8.0) 近似（以20日涨幅作为距均线涨幅的代理，严格来说应为收盘价/MA20-1<8%，现有指标无法精确计算，已用N日涨幅近似）；6)
+  卖出条件：跌破10日线用 MA.price_below(fast=5,slow=10)（慢线=10日线），MACD死叉用 death_cross，持仓亏损3%止损用
+  PRICE_PCT.<(value=-3.0) 近似（以近期跌幅代理持仓成本亏损，精确止损需结合建仓价，现有指标无法直接计算持仓成本，已用该方式近似）；7) 仓位管理（最多10只/每只10%）属于资金管理层面，条件构建器无对应指标，需在回测系统或交易执行层单独配置。

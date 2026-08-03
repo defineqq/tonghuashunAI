@@ -1,0 +1,43 @@
+id: fanbaao_strong_v2
+name: 强势反包涨停策略
+description: 昨日大跌且尾盘未反弹，今日放量强势反包上涨超5%并站上5日均线时买入，持有3日或触发止盈止损卖出
+buy:
+  logic: AND
+  rules:
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 1
+    value: 5.0
+  - indicator: VOLUME_RATIO
+    op: '>'
+    params:
+      n: 20
+    value: 1.5
+  - indicator: MA
+    op: price_above
+    params:
+      fast: 5
+      slow: 5
+sell:
+  logic: OR
+  rules:
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 1
+    value: -5.0
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 3
+    value: 10.0
+  - indicator: CONSEC
+    op: up>=
+    params: {}
+    value: 3
+notes: 【买入条件说明】1) 今日涨幅超5%用 PRICE_PCT n=1 op='>' value=5.0 表达；2) 成交量是昨日1.5倍用 VOLUME_RATIO
+  n=20 op='>' value=1.5 近似（标准量比指标，反映近期放量程度）；3) 价格站上5日均线用 MA price_above fast=5 slow=5
+  表达（fast与slow同值即只看5日均线）。【无法精确表达的条件】'昨日跌幅与振幅比值>0.6（尾盘未反弹）'无法用现有指标精确建模，已省略该筛选条件；'昨日下跌超3%'的前日价格条件也无法直接用现有指标组合表达，已用今日强势反包涨幅>5%作为隐性替代（大涨本身意味着前日有下跌空间）。【卖出条件说明】1)
+  亏损超5%止损用 PRICE_PCT n=1 op='<' value=-5.0（当日跌幅）近似，实际持仓亏损需平台持仓盈亏逻辑支持；2) 盈利超10%止盈用
+  PRICE_PCT n=3 op='>' value=10.0（3日累计涨幅超10%）近似；3) 持有3日强制卖出用 CONSEC up>= value=3 近似（连续3日阳线后卖出），严格的'持有N日后卖出'逻辑需平台持仓时间规则支持。【资金管理】每只股票仓位不超过10%为资金管理规则，条件构建器不支持仓位控制，请在交易系统层面手动设置。

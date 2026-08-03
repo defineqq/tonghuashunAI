@@ -1,0 +1,75 @@
+id: qiangshi_pullback_buy
+name: 强势股低吸反弹策略
+description: 选取近期有涨停记录的强势股，在缩量回调至关键均线附近时低吸，以MACD零轴过滤趋势反转风险，涨幅止盈或跌破均线止损
+buy:
+  logic: AND
+  rules:
+  - indicator: HIGH_LOW_N
+    op: new_high
+    params:
+      n: 20
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 5
+    value: -5.0
+  - indicator: VOLUME
+    op: shrink
+    params:
+      n: 20
+    value: 0.5
+  - indicator: MACD
+    op: dif_above_zero
+    params:
+      fast: 12
+      slow: 26
+      signal: 9
+  - indicator: STAY_MA
+    op: above
+    params:
+      n: 10
+      days: 1
+sell:
+  logic: OR
+  rules:
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 20
+    value: 8.0
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 1
+    value: -3.0
+  - indicator: MA
+    op: price_below
+    params:
+      fast: 5
+      slow: 20
+notes: '【买入条件映射说明】
+
+  1. 条件1「过去20日出现过涨停」：现有指标库无法精确检索历史涨停记录，已用 HIGH_LOW_N.new_high(n=20)「创20日新高」近似——近期创新高的股票通常伴随涨停，但无法严格区分。此条件存在近似误差，请在实盘中人工二次确认。
+
+  2. 条件2「回调至涨停价95%以下」：无法精确引用涨停日收盘价作为动态基准，已用 PRICE_PCT.<(n=5, value=-5.0)「5日内累计跌幅超5%」近似，表达短期回调幅度。
+
+  3. 条件3「成交量小于涨停日50%」：无法精确对比涨停日成交量，已用 VOLUME.shrink(n=20, value=0.5)「当日量小于20日均量的0.5倍」近似缩量含义。
+
+  4. 条件4「DIF > -0.5」：指标库中MACD仅支持DIF上穿零轴（dif_above_zero）和下穿零轴（dif_below_zero），无法设置DIF精确数值阈值-0.5，已用
+  MACD.dif_above_zero 近似（DIF在零轴上方，趋势尚未明显反转）。
+
+  5. 条件5「收盘价在5日线和10日线之间或上方」：已用 STAY_MA.above(n=10, days=1)「收盘价在10日均线上方」近似，保证价格不低于较慢的均线。
+
+
+  【卖出条件映射说明】
+
+  1. 止盈8%：用 PRICE_PCT.>(n=20, value=8.0) 近似，n=20覆盖持仓周期内涨幅统计。
+
+  2. 止损3%：用 PRICE_PCT.<(n=1, value=-3.0) 表达当日跌幅超3%。
+
+  3. 持有超10个交易日强制出场：现有指标库无持仓天数计数指标，无法精确实现，建议在交易系统层面单独设置持仓日期提醒，此条件未纳入JSON。
+
+  4. 跌破20日均线：用 MA.price_below(fast=5, slow=20) 实现。
+
+
+  【仓位管理】单只不超过10%、最多10只的仓位管理规则属于资金管理层，当前条件构建器不支持，需在交易系统或程序化模块中单独配置。'

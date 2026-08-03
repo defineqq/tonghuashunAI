@@ -361,7 +361,7 @@ def _action_create_strategy(args: dict) -> dict:
         suggested_name=args.get("suggested_name"),
     )
     spec = r["spec"]
-    out = Path("configs/user_strategies") / f"{spec['id']}.yaml"
+    out = PROJECT_ROOT / "configs" / "user_strategies" / f"{spec['id']}.yaml"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(_yaml.safe_dump(spec, allow_unicode=True, sort_keys=False), encoding="utf-8")
     registry.register(BuilderStrategy(spec))

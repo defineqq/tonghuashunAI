@@ -1,0 +1,47 @@
+id: youzi_oversold_bounce
+name: 游资T+0超跌低吸策略
+description: 中小盘活跃股价格相对5日均线超跌3%且缩量、RSI低于40时买入，涨超5%止盈或再跌3%止损卖出
+buy:
+  logic: AND
+  rules:
+  - indicator: MARKET_CAP
+    op: <
+    params: {}
+    value: 500
+  - indicator: MA
+    op: price_below
+    params:
+      fast: 5
+      slow: 5
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 5
+    value: -3.0
+  - indicator: VOLUME
+    op: shrink
+    params:
+      n: 5
+    value: 0.7
+  - indicator: RSI
+    op: <
+    params:
+      n: 14
+    value: 40
+sell:
+  logic: OR
+  rules:
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 1
+    value: 5.0
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 1
+    value: -3.0
+notes: 1. 买入逻辑：MARKET_CAP < 500亿筛选中小盘；PRICE_PCT(n=5) < -3% 表示近5日相对5日均线超跌（以N日涨跌幅近似）；VOLUME.shrink(n=5,
+  value=0.7) 表示当日量小于5日均量的0.7倍即缩量；RSI(14) < 40 确认弱势超卖。2. 卖出逻辑：PRICE_PCT(n=1) > 5% 为持仓期间当日涨幅止盈；PRICE_PCT(n=1)
+  < -3% 为当日跌幅止损，两者任一触发即卖出（OR）。3. 仓位控制（单只≤10%，最多10只）属于资金管理规则，条件构建器无对应指标，需在实际交易系统的仓位管理模块中单独配置，此处无法用现有指标精确表达。4.
+  PRICE_PCT 的 n 参数在止盈止损规则中设为1，代表当日涨跌幅，用于模拟持仓中的动态监控。

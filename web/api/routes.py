@@ -18,6 +18,12 @@ from pydantic import BaseModel, Field
 import pandas as pd
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+CONFIGS_DIR = PROJECT_ROOT / "configs"
+LOGS_DIR = PROJECT_ROOT / "logs"
+USER_STRATEGY_DIR = CONFIGS_DIR / "user_strategies"
+
+
 router = APIRouter()
 
 
@@ -320,7 +326,7 @@ def new_portfolio(req: NewPortfolioRequest):
 
 @router.get("/portfolio", summary="列出所有账户")
 def list_portfolios():
-    root = Path("logs") / "portfolio"
+    root = LOGS_DIR / "portfolio"
     if not root.exists():
         return {"accounts": []}
     return {"accounts": [f.stem for f in root.glob("*.json")]}
@@ -435,7 +441,7 @@ def _default_weights() -> dict:
     """兜底：读 configs/strategy.yaml 里的 swing_v1 权重。"""
     import yaml
     try:
-        with open("configs/strategy.yaml", encoding="utf-8") as f:
+        with open(CONFIGS_DIR / "strategy.yaml", encoding="utf-8") as f:
             return yaml.safe_load(f)["swing_v1"]["weights"]
     except Exception:
         return PRESET_WEIGHTS["balanced"]
@@ -628,7 +634,7 @@ def gen_daily_report(req: DailyReportRequest):
 
     save_to = None
     if req.save:
-        save_to = Path("logs") / "reports" / f"{as_of}.md"
+        save_to = LOGS_DIR / "reports" / f"{as_of}.md"
 
     md = daily_report.render(as_of=as_of, symbols=symbols, top_n=req.top_n, save_to=save_to)
     return {"as_of": as_of, "path": str(save_to) if save_to else None, "markdown": md}
@@ -636,7 +642,7 @@ def gen_daily_report(req: DailyReportRequest):
 
 @router.get("/report/list", summary="历史报告列表")
 def list_reports():
-    root = Path("logs") / "reports"
+    root = LOGS_DIR / "reports"
     if not root.exists():
         return {"reports": []}
     reports = sorted([f.name for f in root.glob("*.md")], reverse=True)
@@ -645,7 +651,7 @@ def list_reports():
 
 @router.get("/report/{name}", summary="读某份历史报告")
 def read_report(name: str):
-    p = Path("logs") / "reports" / name
+    p = LOGS_DIR / "reports" / name
     if not p.exists() or ".." in name:
         raise HTTPException(404, "报告不存在")
     return {"name": name, "markdown": p.read_text(encoding="utf-8")}
@@ -680,7 +686,7 @@ def paper_run(req: PaperRunRequest):
         except Exception:
             pass
 
-    with open("configs/strategy.yaml", encoding="utf-8") as f:
+    with open(CONFIGS_DIR / "strategy.yaml", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)["swing_v1"]
 
     result = execute_day(
@@ -858,7 +864,8 @@ def backtest_task_cancel(task_id: str):
 # ================ Qbot 集成 =================
 
 
-QBOT_STRATEGY_DIR = Path("vendor/Qbot/qbot/strategies")
+QBOT_STRATEGY_DIR = PROJECT_ROOT / "vendor" / "Qbot" / "qbot" / "strategies"
+QBOT_DOCS_DIR = PROJECT_ROOT / "vendor" / "Qbot" / "docs"
 
 
 @router.get("/qbot/strategies", summary="Qbot 内置策略列表")
@@ -892,7 +899,7 @@ def qbot_strategy_source(name: str):
 
 @router.get("/qbot/docs", summary="Qbot 文档目录")
 def qbot_docs():
-    root = Path("vendor/Qbot/docs")
+    root = QBOT_DOCS_DIR
     if not root.exists():
         return {"docs": []}
     items = []
@@ -906,7 +913,7 @@ def qbot_docs():
 def qbot_doc(path: str):
     if ".." in path:
         raise HTTPException(400, "非法路径")
-    p = Path("vendor/Qbot/docs") / path
+    p = QBOT_DOCS_DIR / path
     if not p.exists() or not p.is_file():
         raise HTTPException(404, "文档不存在")
     return {"path": path, "markdown": p.read_text(encoding="utf-8", errors="replace")}
@@ -982,7 +989,7 @@ def get_builder_spec(strategy_id: str):
     从 configs/user_strategies/{id}.yaml 读原始 spec，供前端「编辑」按钮回填表单。
     """
     import yaml as _yaml
-    out = Path("configs/user_strategies") / f"{strategy_id}.yaml"
+    out = USER_STRATEGY_DIR / f"{strategy_id}.yaml"
     if out.exists():
         return _yaml.safe_load(out.read_text(encoding="utf-8"))
     # 兜底：如果不在磁盘（例如内存中的 BuilderStrategy），直接从 registry 里读
@@ -1026,7 +1033,7 @@ def builder_from_ai(req: BuilderFromAIRequest):
 
     if req.save:
         spec = result["spec"]
-        out = Path("configs/user_strategies") / f"{spec['id']}.yaml"
+        out = USER_STRATEGY_DIR / f"{spec['id']}.yaml"
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(_yaml.safe_dump(spec, allow_unicode=True, sort_keys=False), encoding="utf-8")
         registry.register(BuilderStrategy(spec))
@@ -1056,7 +1063,7 @@ def save_builder_strategy(req: BuilderSaveRequest):
         raise HTTPException(400, err)
 
     # 保存到 configs/user_strategies/{id}.yaml
-    out = Path("configs/user_strategies") / f"{spec['id']}.yaml"
+    out = USER_STRATEGY_DIR / f"{spec['id']}.yaml"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(_yaml.safe_dump(spec, allow_unicode=True, sort_keys=False), encoding="utf-8")
 
@@ -1070,7 +1077,7 @@ def save_builder_strategy(req: BuilderSaveRequest):
 @router.delete("/strategies/builder/{strategy_id}", summary="删除条件构建器策略")
 def delete_builder_strategy(strategy_id: str):
     from strategies.registry import registry
-    out = Path("configs/user_strategies") / f"{strategy_id}.yaml"
+    out = USER_STRATEGY_DIR / f"{strategy_id}.yaml"
     if out.exists():
         out.unlink()
     registry.unregister(strategy_id)
@@ -1080,7 +1087,7 @@ def delete_builder_strategy(strategy_id: str):
 # ================ 用户 Python 策略 =================
 
 
-USER_PY_DIR = Path("strategies/user_defined")
+USER_PY_DIR = PROJECT_ROOT / "strategies" / "user_defined"
 
 
 @router.get("/strategies/python/template", summary="Python 策略模板")
@@ -1152,8 +1159,8 @@ def delete_python_strategy(filename: str):
 # ================ 设置 =================
 
 
-ENV_FILE = Path(".env")
-STRATEGY_FILE = Path("configs/strategy.yaml")
+ENV_FILE = PROJECT_ROOT / ".env"
+STRATEGY_FILE = CONFIGS_DIR / "strategy.yaml"
 
 # 允许通过设置页读写的环境变量白名单（避免用户误改敏感/系统变量）
 ENV_KEYS = [

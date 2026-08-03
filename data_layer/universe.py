@@ -43,7 +43,12 @@ _INDEX_FN = {
 }
 
 
-def load_pool(config_path: str | Path = "configs/stock_pool.yaml") -> list[str]:
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def load_pool(config_path: str | Path | None = None) -> list[str]:
+    if config_path is None:
+        config_path = _PROJECT_ROOT / "configs" / "stock_pool.yaml"
     """
     根据 configs/stock_pool.yaml 加载股票池。
 

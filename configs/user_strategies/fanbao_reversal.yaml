@@ -1,0 +1,56 @@
+id: fanbao_reversal
+name: 游资反包+量能共振追涨
+description: 昨日跌停或大跌后今日反包（涨幅超3%）、量能放大1.5倍、站上5日均线、中小盘市值过滤，涨幅8%或跌破5日线止损离场
+buy:
+  logic: AND
+  rules:
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 1
+    value: -5.0
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 1
+    value: 3.0
+  - indicator: VOLUME_RATIO
+    op: '>'
+    params:
+      n: 20
+    value: 1.5
+  - indicator: MA
+    op: price_above
+    params:
+      fast: 5
+      slow: 20
+  - indicator: MARKET_CAP
+    op: '>'
+    params: {}
+    value: 50
+  - indicator: MARKET_CAP
+    op: <
+    params: {}
+    value: 500
+sell:
+  logic: OR
+  rules:
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 1
+    value: 8.0
+  - indicator: MA
+    op: price_below
+    params:
+      fast: 5
+      slow: 20
+  - indicator: CONSEC
+    op: dn>=
+    params: {}
+    value: 3
+notes: 1. 买入条件1「昨日跌停或大跌」用 PRICE_PCT n=1 op '<' value=-5.0 近似（跌停用-5%覆盖，若需精确跌停可改用LIMIT.down，但此处合并处理）；「今日涨幅超3%」用
+  PRICE_PCT n=1 op '>' value=3.0 表达当日涨幅反包信号，两者AND结合实现昨跌今涨的反包逻辑。2. 量能放大1.5倍用 VOLUME_RATIO
+  n=20 op '>' value=1.5 表达。3. 站上5日均线用 MA price_above fast=5 表达。4. 市值50-500亿用 MARKET_CAP
+  > 50 AND < 500 过滤中小盘。5. 卖出条件：涨幅8%目标位用 PRICE_PCT > 8.0；跌破5日线止损用 MA price_below；「持仓超3日无上涨」用
+  CONSEC dn>=3（连续3根阴线）近似，因系统无持仓天数计数器，以连续阴线代替「无上涨」逻辑。6. 仓位管理（单只≤20%、最多5只）属于资金管理层面，当前条件构建器暂无法通过指标规则表达，需在交易系统仓位模块单独配置。

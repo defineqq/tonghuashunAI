@@ -1,0 +1,42 @@
+id: lianban_accel_v2
+name: 连续涨停板动量加速策略
+description: 昨日涨停、今日高开、股价站上5日线、5日线斜率向上、放量1.5倍时买入；跌破10日线、持有超5日或当日跌幅超7%时卖出
+buy:
+  logic: AND
+  rules:
+  - indicator: LIMIT
+    op: up
+    params: {}
+  - indicator: MA
+    op: price_above
+    params:
+      fast: 5
+      slow: 5
+  - indicator: MA_ARRANGE
+    op: bull
+    params:
+      short: 5
+      mid: 10
+      long: 20
+  - indicator: VOLUME
+    op: surge
+    params:
+      n: 5
+    value: 1.5
+sell:
+  logic: OR
+  rules:
+  - indicator: MA
+    op: price_below
+    params:
+      fast: 5
+      slow: 10
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 1
+    value: -7.0
+notes: 买入条件说明：1）LIMIT.up 捕捉昨日涨停（系统以昨日收盘涨停为信号，今日触发判断）；2）今日开盘高于昨日收盘（高开）现有指标无法精确表达，已省略，实际使用时建议在回测引擎中补充
+  open > prev_close 的过滤；3）MA.price_above(fast=5,slow=5) 用股价高于5日均线表达站上5日线；4）MA_ARRANGE.bull(short=5,mid=10,long=20)
+  近似表达5日线斜率向上（5日>10日即短期均线在中期均线之上，斜率向上）；5）VOLUME.surge(n=5, value=1.5) 表示当日量大于5日均量1.5倍。卖出条件说明：1）MA.price_below(slow=10)
+  表示股价跌破10日均线；2）PRICE_PCT.< value=-7.0 表示当日跌幅超7%止损；3）持有超过5个交易日强制卖出属于持仓时间管理逻辑，现有指标目录无法表达，已在notes中说明，需在交易系统的持仓管理模块中单独配置。

@@ -24,7 +24,12 @@ from analysis import technical, fundamental_score, moneyflow_score
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
-def _load_weights(config_path: str | Path = "configs/strategy.yaml") -> dict:
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _load_weights(config_path: str | Path | None = None) -> dict:
+    if config_path is None:
+        config_path = _PROJECT_ROOT / "configs" / "strategy.yaml"
     p = Path(config_path)
     if not p.is_absolute() and not p.exists():
         p = _PROJECT_ROOT / p
