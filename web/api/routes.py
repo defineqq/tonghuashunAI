@@ -8,6 +8,7 @@ FastAPI 路由
 from __future__ import annotations
 
 import os
+from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -1374,3 +1375,112 @@ def agent_markdown_download(task_id: str):
         media_type="text/markdown; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="agent_{task_id}.md"'},
     )
+
+
+# ================ 实时模拟盘（M9 live_paper） =================
+
+
+class LiveStartRequest(BaseModel):
+    account: str = "live_default"
+    watch_symbols: list[str] = Field(default_factory=list, description="要跑策略的股票池")
+    strategy_id: Optional[str] = None
+    strategy_params: Optional[dict] = None
+    tick_seconds: int = 15
+
+
+@router.post("/live/start", summary="启动实时模拟盘 runner")
+def live_start(req: LiveStartRequest):
+    from execution.runner import start_runner
+    r = start_runner(
+        account=req.account,
+        watch_symbols=req.watch_symbols,
+        strategy_id=req.strategy_id,
+        strategy_params=req.strategy_params or {},
+        tick_seconds=req.tick_seconds,
+    )
+    return {"account": r.account, "status": r.state.status,
+            "started_at": r.state.started_at}
+
+
+@router.post("/live/{account}/stop", summary="停止实时模拟盘 runner")
+def live_stop(account: str):
+    from execution.runner import stop_runner
+    ok = stop_runner(account)
+    if not ok:
+        raise HTTPException(404, "runner 不存在或已停止")
+    return {"account": account, "status": "stopped"}
+
+
+@router.get("/live", summary="列出所有实时模拟盘 runner")
+def live_list():
+    from execution.runner import list_runners
+    return {"runners": list_runners()}
+
+
+@router.get("/live/{account}", summary="查询单个 runner 的状态 + 账户 + 挂单")
+def live_status(account: str):
+    from execution.runner import RunnerState, get_runner
+    from paper_trade import portfolio as pfolio
+    from execution.broker import PaperBroker
+    state = RunnerState.load(account)
+    port_path = pfolio.default_path(account)
+    port = None
+    orders = []
+    if port_path.exists():
+        port = pfolio.Portfolio.load(port_path)
+        broker = PaperBroker(port, account=account)
+        orders = [
+            {
+                "order_id": o.order_id, "symbol": o.symbol,
+                "side": o.side.value if hasattr(o.side, "value") else o.side,
+                "shares": o.shares, "filled_shares": o.filled_shares,
+                "limit_price": o.limit_price,
+                "filled_avg_price": o.filled_avg_price,
+                "status": o.status.value if hasattr(o.status, "value") else o.status,
+                "reason": o.reason,
+                "submitted_at": o.submitted_at, "finished_at": o.finished_at,
+                "reject_reason": o.reject_reason,
+            }
+            for o in broker.query_orders()
+        ]
+    return {
+        "state": asdict(state) if state else None,
+        "portfolio": port.to_dict() if port else None,
+        "orders": orders,
+    }
+
+
+class LiveOrderRequest(BaseModel):
+    account: str
+    symbol: str
+    side: str = Field(..., description="buy | sell")
+    shares: int
+    limit_price: float
+    reason: str = "手动下单"
+
+
+@router.post("/live/order", summary="实时模拟盘：手动下一笔委托")
+def live_submit_order(req: LiveOrderRequest):
+    from execution.broker import PaperBroker, OrderSide
+    from paper_trade import portfolio as pfolio
+    port = pfolio.load_or_create(req.account)
+    broker = PaperBroker(port, account=req.account)
+    side = OrderSide(req.side)
+    order = broker.submit_order(
+        symbol=req.symbol, side=side, shares=req.shares,
+        limit_price=req.limit_price, reason=req.reason,
+    )
+    port.save(pfolio.default_path(req.account))
+    return {"order_id": order.order_id, "status": order.status.value}
+
+
+@router.post("/live/order/{order_id}/cancel", summary="实时模拟盘：撤单")
+def live_cancel_order(order_id: str, account: str):
+    from execution.broker import PaperBroker
+    from paper_trade import portfolio as pfolio
+    port = pfolio.load_or_create(account)
+    broker = PaperBroker(port, account=account)
+    ok = broker.cancel_order(order_id)
+    if not ok:
+        raise HTTPException(404, "订单不存在或已终态")
+    return {"order_id": order_id, "status": "cancelled"}

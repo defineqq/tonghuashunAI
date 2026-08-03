@@ -301,6 +301,85 @@
       <div id="acct-view" class="mt-6 text-sm text-slate-500">先选一个账户或新建一个...</div>
     </div>
 
+    <!-- 实时模拟盘 · M9 -->
+    <div class="card p-6 border-2 border-emerald-100">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="text-2xl">⚡</span>
+        <h2 class="text-xl font-semibold">实时模拟盘 · Live Paper</h2>
+        <span id="live-status-badge" class="ml-auto text-[11px] px-2 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200">未启动</span>
+      </div>
+      <p class="text-sm text-slate-500 mb-4">
+        开启后，后台每 <span id="live-tick-display">15</span> 秒拉一次全 A 快照 → 撮合限价单 → 跑策略。<br>
+        <b>只在交易时段 9:30–11:30 / 13:00–15:00 才实际下单，其他时间静默 sleep。</b>刷新页面不丢，随时可停。
+      </p>
+      <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
+        <div>
+          <div class="label">账户名</div>
+          <input id="live-account" type="text" placeholder="live_default" value="live_default" class="field">
+        </div>
+        <div>
+          <div class="label">tick 间隔（秒）</div>
+          <input id="live-tick" type="number" value="15" min="5" max="120" class="field">
+        </div>
+        <div>
+          <div class="label">策略（可选）</div>
+          <select id="live-strategy" class="field">
+            <option value="">— 只跑手动下单 —</option>
+          </select>
+        </div>
+        <div class="md:col-span-2">
+          <div class="label">股票池（逗号分隔，仅策略模式用）</div>
+          <input id="live-symbols" type="text" placeholder="600519,000858,300750" class="field">
+        </div>
+      </div>
+      <div class="flex gap-2 items-center flex-wrap">
+        <button onclick="startLive()" id="live-start-btn" class="btn btn-primary">▶ 启动引擎</button>
+        <button onclick="stopLive()" id="live-stop-btn" class="btn btn-ghost text-red-600 hidden">⏹ 停止</button>
+        <button onclick="refreshLive()" class="btn btn-ghost">🔄 刷新</button>
+        <button onclick="openLiveOrderModal()" class="btn btn-ghost">📝 手动下单</button>
+        <span id="live-status-msg" class="text-sm text-slate-500 ml-2"></span>
+      </div>
+      <div id="live-view" class="mt-4"></div>
+    </div>
+
+    <!-- 手动下单弹窗 -->
+    <div id="live-order-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div class="bg-white rounded-xl w-full max-w-md p-6 shadow-2xl">
+        <h3 class="text-lg font-semibold mb-4">📝 实时模拟盘 · 手动委托</h3>
+        <div class="space-y-3">
+          <div>
+            <div class="label">股票代码</div>
+            <input id="lo-symbol" type="text" placeholder="600519" class="field">
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <div class="label">方向</div>
+              <select id="lo-side" class="field">
+                <option value="buy">买入 buy</option>
+                <option value="sell">卖出 sell</option>
+              </select>
+            </div>
+            <div>
+              <div class="label">股数（100 的倍数）</div>
+              <input id="lo-shares" type="number" value="100" step="100" class="field">
+            </div>
+          </div>
+          <div>
+            <div class="label">限价（元）</div>
+            <input id="lo-price" type="number" step="0.01" class="field">
+          </div>
+          <div>
+            <div class="label">备注</div>
+            <input id="lo-reason" type="text" value="手动下单" class="field">
+          </div>
+        </div>
+        <div class="mt-5 flex justify-end gap-2">
+          <button onclick="closeLiveOrderModal()" class="btn btn-ghost">取消</button>
+          <button onclick="submitLiveOrder()" class="btn btn-primary">提交委托</button>
+        </div>
+      </div>
+    </div>
+
     <!-- AI 行动对话框 -->
     <div class="card p-6 border-2 border-purple-100">
       <div class="flex items-center gap-2 mb-2">

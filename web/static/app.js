@@ -28,7 +28,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     if (btn.dataset.tab === 'settings') loadSettings();
     if (btn.dataset.tab === 'strategies') loadStrategiesLab();
     if (btn.dataset.tab === 'backtest') { loadBacktestStrategies(); loadBacktestHistory(); }
-    if (btn.dataset.tab === 'portfolio') { loadAgentHistory(); autoResumeRunningAgent(); }
+    if (btn.dataset.tab === 'portfolio') { loadAgentHistory(); autoResumeRunningAgent(); loadLiveStrategies(); refreshLive(); }
   });
 });
 
@@ -2062,3 +2062,237 @@ window.onBacktestStrategyChange = function() {
   document.getElementById('bt-start').value = start.toISOString().slice(0, 10);
   document.getElementById('bt-end').value = end.toISOString().slice(0, 10);
 })();
+
+
+// -------- 实时模拟盘（M9 live_paper） --------
+let _livePollTimer = null;
+
+async function loadLiveStrategies() {
+  try {
+    const r = await API('/strategies');
+    const sel = document.getElementById('live-strategy');
+    if (!sel) return;
+    // 保留第一项 "只手动下单"，追加所有 technical 策略
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">— 只跑手动下单 —</option>';
+    r.strategies.filter(s => s.kind === 'preset' || s.kind === 'builder' || s.kind === 'python')
+      .forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s.id;
+        opt.textContent = `${s.name} (${s.kind})`;
+        sel.appendChild(opt);
+      });
+    if (cur) sel.value = cur;
+  } catch (e) { console.warn('load live strategies failed', e); }
+}
+
+async function startLive() {
+  const account = document.getElementById('live-account').value.trim() || 'live_default';
+  const tick = parseInt(document.getElementById('live-tick').value) || 15;
+  const strategyId = document.getElementById('live-strategy').value || null;
+  const symbols = document.getElementById('live-symbols').value
+    .split(/[,，\s]+/).map(s => s.trim()).filter(Boolean);
+  try {
+    await API('/live/start', {
+      method: 'POST',
+      body: JSON.stringify({
+        account, tick_seconds: tick,
+        strategy_id: strategyId,
+        watch_symbols: symbols,
+      }),
+    });
+    document.getElementById('live-status-msg').innerHTML =
+      '<span class="text-emerald-600">✓ 引擎已启动</span>';
+    startLivePolling();
+  } catch (e) {
+    document.getElementById('live-status-msg').innerHTML =
+      `<span class="text-red-500">失败: ${e.message}</span>`;
+  }
+}
+window.startLive = startLive;
+
+async function stopLive() {
+  const account = document.getElementById('live-account').value.trim() || 'live_default';
+  if (!confirm('确定停止引擎？未成交的委托保留，可稍后重新启动。')) return;
+  try {
+    await API(`/live/${account}/stop`, { method: 'POST' });
+    document.getElementById('live-status-msg').innerHTML =
+      '<span class="text-slate-500">⏹ 已停止</span>';
+    if (_livePollTimer) { clearInterval(_livePollTimer); _livePollTimer = null; }
+    refreshLive();
+  } catch (e) {
+    alert('停止失败: ' + e.message);
+  }
+}
+window.stopLive = stopLive;
+
+function startLivePolling() {
+  if (_livePollTimer) clearInterval(_livePollTimer);
+  refreshLive();
+  _livePollTimer = setInterval(refreshLive, 3000);
+}
+
+async function refreshLive() {
+  const account = document.getElementById('live-account').value.trim() || 'live_default';
+  const view = document.getElementById('live-view');
+  const badge = document.getElementById('live-status-badge');
+  const stopBtn = document.getElementById('live-stop-btn');
+  const startBtn = document.getElementById('live-start-btn');
+  try {
+    const r = await API(`/live/${account}`);
+    const s = r.state;
+    if (s && s.status === 'running') {
+      badge.textContent = `▶ 运行中 · tick=${s.tick_seconds}s`;
+      badge.className = 'ml-auto text-[11px] px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200';
+      stopBtn.classList.remove('hidden');
+      startBtn.textContent = '重新启动';
+      if (!_livePollTimer) startLivePolling();
+    } else {
+      badge.textContent = s ? `⏹ ${s.status}` : '未启动';
+      badge.className = 'ml-auto text-[11px] px-2 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200';
+      stopBtn.classList.add('hidden');
+      startBtn.textContent = '▶ 启动引擎';
+    }
+    document.getElementById('live-tick-display').textContent = s ? s.tick_seconds : 15;
+
+    const port = r.portfolio;
+    const orders = r.orders || [];
+    const active = orders.filter(o => o.status === 'pending' || o.status === 'partial');
+    const finished = orders.filter(o => o.status === 'filled' || o.status === 'cancelled' || o.status === 'rejected');
+
+    let statHtml = '';
+    if (port) {
+      const total = port.cash + Object.values(port.positions).reduce((a, p) => a + p.shares * (p.last_price || p.avg_cost), 0);
+      const pnl = ((total - port.initial_cash) / port.initial_cash * 100);
+      statHtml = `
+        <div class="grid grid-cols-4 gap-3 mb-4">
+          <div class="p-3 bg-slate-50 rounded"><div class="text-xs text-slate-500">现金</div><div class="text-lg font-semibold">¥${port.cash.toLocaleString(undefined,{maximumFractionDigits:0})}</div></div>
+          <div class="p-3 bg-slate-50 rounded"><div class="text-xs text-slate-500">总市值</div><div class="text-lg font-semibold">¥${total.toLocaleString(undefined,{maximumFractionDigits:0})}</div></div>
+          <div class="p-3 rounded ${pnl>=0?'bg-red-50':'bg-emerald-50'}"><div class="text-xs ${pnl>=0?'text-red-600':'text-emerald-600'}">累计 PnL</div><div class="text-lg font-semibold ${pnl>=0?'text-red-600':'text-emerald-600'}">${pnl>=0?'+':''}${pnl.toFixed(2)}%</div></div>
+          <div class="p-3 bg-slate-50 rounded"><div class="text-xs text-slate-500">运行状态</div><div class="text-sm mt-1">ticks: ${s?s.ticks_count:0} · 成交: ${s?s.orders_filled_count:0}<br>最后 tick: <span class="text-slate-400">${s&&s.last_tick_at?s.last_tick_at.split('T')[1]:'—'}</span></div></div>
+        </div>
+      `;
+    }
+
+    const activeHtml = active.length ? `
+      <div class="mt-3">
+        <div class="text-sm font-semibold text-slate-700 mb-2">🟢 活跃委托 (${active.length})</div>
+        <div class="overflow-x-auto"><table class="min-w-full text-xs">
+          <thead class="bg-slate-50 text-slate-500"><tr>
+            <th class="px-2 py-1 text-left">代码</th><th class="px-2 py-1 text-left">方向</th>
+            <th class="px-2 py-1 text-left">股数</th><th class="px-2 py-1 text-left">限价</th>
+            <th class="px-2 py-1 text-left">提交时间</th><th class="px-2 py-1 text-left">备注</th>
+            <th class="px-2 py-1 text-left">操作</th>
+          </tr></thead><tbody>
+          ${active.map(o => `
+            <tr class="border-b border-slate-100">
+              <td class="px-2 py-1 font-mono">${o.symbol}</td>
+              <td class="px-2 py-1 ${o.side==='buy'?'text-red-600':'text-emerald-600'}">${o.side==='buy'?'买':'卖'}</td>
+              <td class="px-2 py-1">${o.shares}</td>
+              <td class="px-2 py-1">¥${o.limit_price.toFixed(2)}</td>
+              <td class="px-2 py-1 text-slate-400">${(o.submitted_at||'').split('T')[1] || o.submitted_at}</td>
+              <td class="px-2 py-1 text-slate-500">${o.reason || ''}</td>
+              <td class="px-2 py-1"><button onclick="cancelLiveOrder('${o.order_id}')" class="text-xs text-red-500 hover:underline">撤单</button></td>
+            </tr>
+          `).join('')}
+        </tbody></table></div>
+      </div>
+    ` : '<div class="mt-3 text-xs text-slate-400 text-center p-3">🟡 暂无活跃委托</div>';
+
+    const posHtml = port && Object.keys(port.positions).length ? `
+      <div class="mt-3">
+        <div class="text-sm font-semibold text-slate-700 mb-2">📊 当前持仓 (${Object.keys(port.positions).length})</div>
+        <div class="overflow-x-auto"><table class="min-w-full text-xs">
+          <thead class="bg-slate-50 text-slate-500"><tr>
+            <th class="px-2 py-1 text-left">代码</th><th class="px-2 py-1 text-left">股数</th>
+            <th class="px-2 py-1 text-left">成本</th><th class="px-2 py-1 text-left">现价</th>
+            <th class="px-2 py-1 text-left">浮盈</th>
+          </tr></thead><tbody>
+          ${Object.entries(port.positions).map(([sym, p]) => {
+            const pct = p.last_price ? ((p.last_price - p.avg_cost) / p.avg_cost * 100) : 0;
+            return `<tr class="border-b border-slate-100">
+              <td class="px-2 py-1 font-mono">${sym}</td>
+              <td class="px-2 py-1">${p.shares}</td>
+              <td class="px-2 py-1">¥${p.avg_cost.toFixed(2)}</td>
+              <td class="px-2 py-1">¥${(p.last_price||p.avg_cost).toFixed(2)}</td>
+              <td class="px-2 py-1 ${pct>=0?'text-red-600':'text-emerald-600'}">${pct>=0?'+':''}${pct.toFixed(2)}%</td>
+            </tr>`;
+          }).join('')}
+        </tbody></table></div>
+      </div>
+    ` : '';
+
+    const recent = finished.slice(0, 10);
+    const recentHtml = recent.length ? `
+      <details class="mt-3">
+        <summary class="cursor-pointer text-sm text-slate-500">📜 最近完成的委托（${finished.length} 笔）</summary>
+        <div class="overflow-x-auto mt-2"><table class="min-w-full text-xs">
+          <thead class="bg-slate-50 text-slate-500"><tr>
+            <th class="px-2 py-1 text-left">代码</th><th class="px-2 py-1 text-left">方向</th>
+            <th class="px-2 py-1 text-left">成交</th><th class="px-2 py-1 text-left">价格</th>
+            <th class="px-2 py-1 text-left">状态</th><th class="px-2 py-1 text-left">时间</th>
+          </tr></thead><tbody>
+          ${recent.map(o => `
+            <tr class="border-b border-slate-100">
+              <td class="px-2 py-1 font-mono">${o.symbol}</td>
+              <td class="px-2 py-1 ${o.side==='buy'?'text-red-600':'text-emerald-600'}">${o.side==='buy'?'买':'卖'}</td>
+              <td class="px-2 py-1">${o.filled_shares}/${o.shares}</td>
+              <td class="px-2 py-1">${o.filled_avg_price?'¥'+o.filled_avg_price.toFixed(2):'—'}</td>
+              <td class="px-2 py-1">${o.status}${o.reject_reason?' · '+o.reject_reason:''}</td>
+              <td class="px-2 py-1 text-slate-400">${(o.finished_at||'').split('T')[1] || ''}</td>
+            </tr>
+          `).join('')}
+        </tbody></table></div>
+      </details>
+    ` : '';
+
+    view.innerHTML = statHtml + activeHtml + posHtml + recentHtml;
+    if (s && s.error) {
+      document.getElementById('live-status-msg').innerHTML =
+        `<span class="text-amber-600">⚠️ ${s.error}</span>`;
+    }
+  } catch (e) {
+    view.innerHTML = `<div class="text-sm text-slate-500 py-4">尚无实盘数据（先启动引擎或手动下单）</div>`;
+    badge.textContent = '未启动';
+    badge.className = 'ml-auto text-[11px] px-2 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200';
+  }
+}
+window.refreshLive = refreshLive;
+
+window.cancelLiveOrder = async function(orderId) {
+  const account = document.getElementById('live-account').value.trim() || 'live_default';
+  try {
+    await API(`/live/order/${orderId}/cancel?account=${encodeURIComponent(account)}`, { method: 'POST' });
+    refreshLive();
+  } catch (e) { alert('撤单失败: ' + e.message); }
+};
+
+window.openLiveOrderModal = function() {
+  document.getElementById('live-order-modal').classList.remove('hidden');
+};
+window.closeLiveOrderModal = function() {
+  document.getElementById('live-order-modal').classList.add('hidden');
+};
+
+window.submitLiveOrder = async function() {
+  const account = document.getElementById('live-account').value.trim() || 'live_default';
+  const body = {
+    account,
+    symbol: document.getElementById('lo-symbol').value.trim(),
+    side: document.getElementById('lo-side').value,
+    shares: parseInt(document.getElementById('lo-shares').value),
+    limit_price: parseFloat(document.getElementById('lo-price').value),
+    reason: document.getElementById('lo-reason').value || '手动下单',
+  };
+  if (!body.symbol || !body.shares || !body.limit_price) {
+    alert('请填齐代码、股数、限价');
+    return;
+  }
+  try {
+    const r = await API('/live/order', { method: 'POST', body: JSON.stringify(body) });
+    closeLiveOrderModal();
+    document.getElementById('live-status-msg').innerHTML =
+      `<span class="text-emerald-600">✓ 已提交委托 ${r.order_id}</span>`;
+    refreshLive();
+  } catch (e) { alert('下单失败: ' + e.message); }
+};

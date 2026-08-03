@@ -145,6 +145,46 @@ class Portfolio:
     def new(cls, account_id: str, initial_cash: float = 100_000.0) -> "Portfolio":
         return cls(account_id=account_id, initial_cash=initial_cash, cash=initial_cash)
 
+    # ---- 事件驱动式操作（M9 live_paper 用）----
+    def apply_buy(self, symbol: str, shares: int, price: float, fee: float,
+                  date: str, reason: str = "") -> None:
+        """执行一笔买单：扣现金 → 更新加权成本 → 记 Trade。"""
+        amount = shares * price
+        total_cost = amount + fee
+        self.cash = round(self.cash - total_cost, 4)
+        pos = self.positions.get(symbol)
+        if pos is None:
+            self.positions[symbol] = Position(
+                shares=shares, avg_cost=(total_cost / shares) if shares else 0.0,
+                open_date=date, last_price=price,
+            )
+        else:
+            new_shares = pos.shares + shares
+            # 加权平均成本（含费）
+            pos.avg_cost = round((pos.avg_cost * pos.shares + total_cost) / new_shares, 4)
+            pos.shares = new_shares
+            pos.last_price = price
+        self.trades.append(Trade(date=date, symbol=symbol, side="buy",
+                                  shares=shares, price=price, amount=amount,
+                                  fee=fee, reason=reason))
+
+    def apply_sell(self, symbol: str, shares: int, price: float, fee: float,
+                   date: str, reason: str = "") -> None:
+        """执行一笔卖单：加回现金 → 减仓位 → 记 Trade。"""
+        pos = self.positions.get(symbol)
+        if pos is None or pos.shares < shares:
+            raise ValueError(f"apply_sell: 持仓不足 symbol={symbol}")
+        amount = shares * price
+        proceeds = amount - fee
+        self.cash = round(self.cash + proceeds, 4)
+        pos.shares -= shares
+        pos.last_price = price
+        if pos.shares == 0:
+            del self.positions[symbol]
+        self.trades.append(Trade(date=date, symbol=symbol, side="sell",
+                                  shares=shares, price=price, amount=amount,
+                                  fee=fee, reason=reason))
+
 
 def default_path(account_id: str) -> Path:
     """账户文件默认路径：logs/portfolio/{account_id}.json"""

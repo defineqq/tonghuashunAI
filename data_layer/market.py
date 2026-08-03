@@ -125,15 +125,7 @@ def daily(
     raise RuntimeError(f"所有日线数据源都失败 [{symbol}]: {'; '.join(errors)}")
 
 
-@cached("market", max_age_hours=None)
-def minute(
-    symbol: str,
-    start: str,
-    end: str,
-    period: str = "60",
-    adjust: str = "qfq",
-) -> pd.DataFrame:
-    """A 股分钟线。period 可选："1" "5" "15" "30" "60"（分钟）。"""
+def _minute_eastmoney(symbol: str, start: str, end: str, period: str, adjust: str) -> pd.DataFrame:
     import akshare as ak
     raw = ak.stock_zh_a_hist_min_em(
         symbol=symbol,
@@ -144,7 +136,62 @@ def minute(
     )
     df = raw.rename(columns={"时间": "datetime", **_A_HIST_RENAME})
     df["datetime"] = pd.to_datetime(df["datetime"])
-    return df.sort_values("datetime").reset_index(drop=True)
+    keep = [c for c in ["datetime", "open", "high", "low", "close", "volume", "amount", "pct_change"] if c in df.columns]
+    return df[keep].sort_values("datetime").reset_index(drop=True)
+
+
+def _minute_sina(symbol: str, start: str, end: str, period: str, adjust: str) -> pd.DataFrame:
+    """新浪只提供近段分钟数据，作为兜底源。"""
+    import akshare as ak
+    raw = ak.stock_zh_a_minute(symbol=_sina_symbol(symbol), period=period, adjust=adjust or "")
+    df = raw.rename(columns={"day": "datetime"})
+    df["datetime"] = pd.to_datetime(df["datetime"])
+    # 过滤到 [start, end]
+    start_dt = pd.to_datetime(start)
+    end_dt = pd.to_datetime(end) + pd.Timedelta(days=1)
+    df = df[(df["datetime"] >= start_dt) & (df["datetime"] < end_dt)].copy()
+    # 新浪数值列都是 str，强转
+    for c in ("open", "high", "low", "close", "volume"):
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+    keep = [c for c in ["datetime", "open", "high", "low", "close", "volume"] if c in df.columns]
+    return df[keep].sort_values("datetime").reset_index(drop=True)
+
+
+_minute_last_source: str | None = None
+
+
+def minute_last_source() -> str | None:
+    """返回上次 minute() 成功用的数据源标签。"""
+    return _minute_last_source
+
+
+@cached("market", max_age_hours=None)
+def minute(
+    symbol: str,
+    start: str,
+    end: str,
+    period: str = "60",
+    adjust: str = "qfq",
+) -> pd.DataFrame:
+    """
+    A 股分钟线。period 可选："1" "5" "15" "30" "60"（分钟）。
+
+    多源回退：东财 → 新浪。任何一路成功就返回。
+    """
+    global _minute_last_source
+    errors = []
+    for name, fn in [("eastmoney", _minute_eastmoney), ("sina", _minute_sina)]:
+        try:
+            df = fn(symbol, start, end, period, adjust)
+            if df is not None and not df.empty:
+                _minute_last_source = name
+                return df
+            errors.append(f"{name}: empty")
+        except Exception as e:
+            errors.append(f"{name}: {type(e).__name__}: {str(e)[:60]}")
+    _minute_last_source = None
+    raise RuntimeError(f"所有分钟线源都失败 [{symbol}]: {'; '.join(errors)}")
 
 
 # 记录快照最近一次实际用了哪个源，供健康检查/前端展示
