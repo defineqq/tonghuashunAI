@@ -2141,16 +2141,27 @@ async function loadLiveStrategies() {
     const r = await API('/strategies');
     const sel = document.getElementById('live-strategy');
     if (!sel) return;
-    // 保留第一项 "只手动下单"，追加所有 technical 策略
+    // 保留当前选中项；按 kind 分组显示，与策略实验室对齐（中文名 · 英文 id）
     const cur = sel.value;
     sel.innerHTML = '<option value="">— 只跑手动下单 —</option>';
-    r.strategies.filter(s => s.kind === 'preset' || s.kind === 'builder' || s.kind === 'python')
-      .forEach(s => {
+    const kindLabel = { preset: '📦 预置策略', builder: '🎛️ 条件构建', python: '🐍 Python' };
+    const groups = { preset: [], builder: [], python: [] };
+    r.strategies.forEach(s => {
+      if (groups[s.kind]) groups[s.kind].push(s);
+    });
+    Object.entries(groups).forEach(([kind, list]) => {
+      if (!list.length) return;
+      const og = document.createElement('optgroup');
+      og.label = kindLabel[kind] || kind;
+      list.forEach(s => {
         const opt = document.createElement('option');
         opt.value = s.id;
-        opt.textContent = `${s.name} (${s.kind})`;
-        sel.appendChild(opt);
+        // 与策略实验室显示对齐：中文名 · 英文 id
+        opt.textContent = `${s.name} · ${s.id}`;
+        og.appendChild(opt);
       });
+      sel.appendChild(og);
+    });
     if (cur) sel.value = cur;
   } catch (e) { console.warn('load live strategies failed', e); }
 }
@@ -2245,7 +2256,10 @@ async function refreshLive() {
     badge.classList.toggle('hidden', !hasEngine);
     const updateBtn = document.getElementById('live-update-btn');
     if (s && s.status === 'running') {
-      badge.textContent = `⚡ 引擎运行中 · tick=${s.tick_seconds}s · 策略=${s.strategy_id || '手动'}`;
+      // 从策略下拉里反查中文名，展示"中文名 · 英文 id"，跟策略实验室一致
+      const opt = document.querySelector(`#live-strategy option[value="${s.strategy_id || ''}"]`);
+      const stratLabel = s.strategy_id ? (opt ? opt.textContent : s.strategy_id) : '手动模式';
+      badge.textContent = `⚡ 引擎运行中 · tick=${s.tick_seconds}s · ${stratLabel}`;
       badge.className = 'ml-2 text-[11px] px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200';
       stopBtn.classList.remove('hidden');
       updateBtn.classList.remove('hidden');
