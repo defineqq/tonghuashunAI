@@ -1,0 +1,44 @@
+id: limitup_fanbao_nextday
+name: 涨停反包次日买入
+description: 昨日涨停，今日高开且收阳放量反包，次日开盘买入的短线策略
+buy:
+  logic: AND
+  rules:
+  - indicator: LIMIT
+    op: yesterday_up
+  - indicator: REL_PRICE
+    op: open_above_close_pct
+    params:
+      n: 1
+    value: 0.0
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 1
+    value: 0.5
+  - indicator: VOLUME
+    op: surge
+    params:
+      n: 5
+    value: 1.5
+sell:
+  logic: OR
+  rules:
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 1
+    value: 15.0
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 1
+    value: -7.0
+  - indicator: LIMIT
+    op: down
+notes: 【买入条件说明】① LIMIT.yesterday_up 判断昨日涨停（T-1日涨停）；② REL_PRICE.open_above_close_pct
+  n=1 value=0.0 判断今日开盘高于昨日收盘（高开）；③ PRICE_PCT.> value=0.5 判断今日收盘涨幅为正（收阳线反包，取0.5%过滤平盘），注意「收盘>开盘」无法直接用现有指标精确表达，已用「收盘涨幅>0」近似；④
+  VOLUME.surge n=5 value=1.5 判断成交量>5日均量1.5倍（量能活跃）。【买入时机】策略买入信号在T日收盘后触发，实际于T+1日开盘买入；条件构建器不支持「T+1开盘涨停则跳过」的分钟级过滤，建议在回测引擎参数中设置「涨停不可买入」规则。【卖出条件说明】①
+  盈利15%止盈（PRICE_PCT.> value=15.0）；② 亏损7%止损（PRICE_PCT.< value=-7.0），注意PRICE_PCT默认为当日涨跌幅，分钟级盈亏监控需在回测引擎中另行设置持仓成本基准；③
+  LIMIT.down 跌停时标记无法成交，实际跌停无法卖出需由回测引擎处理次日延续卖出逻辑。【无法映射项】① 最多持有3个交易日的时间止损无法用现有指标表达，需在回测参数中设置「最大持仓天数=3」；②
+  T+1日开盘涨停跳过买入、跌停延迟卖出、分钟级止盈止损均依赖回测引擎的tick/分钟级撮合逻辑，条件构建器无法覆盖；③ 按放量倍数排序优先选股需在选股排序参数中配置，非JSON规则可表达范畴。【仓位】每只平均分配，最多同时持有N只（N由回测参数limit控制）。

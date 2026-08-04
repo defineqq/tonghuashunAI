@@ -1,0 +1,67 @@
+id: limitup_fanbao_nextday_v13
+name: 涨停反包次日买入
+description: T-1日涨停封板，T日高开阳线反包放量，T+1日开盘买入的短线反包策略
+buy:
+  logic: AND
+  rules:
+  - indicator: LIMIT
+    op: yesterday_up
+  - indicator: REL_PRICE
+    op: open_above_close_pct
+    params:
+      n: 1
+    value: 0.1
+  - indicator: REL_PRICE
+    op: close_above_close_pct
+    params:
+      n: 1
+    value: 0.1
+  - indicator: VOLUME
+    op: surge
+    params:
+      n: 1
+    value: 1.2
+  - indicator: REL_PRICE
+    op: open_below_close_pct
+    params:
+      n: 1
+    value: 9.8
+sell:
+  logic: OR
+  rules:
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 1
+    value: 15.0
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 1
+    value: -7.0
+  - indicator: LIMIT
+    op: prev_up
+    value: 3
+notes: '【买入条件映射说明】
+
+  1. 「T-1日涨停封板」：用 LIMIT.yesterday_up 表达昨日涨停（不用 LIMIT.up，否则要求今日也涨停导致零成交）。涨停价精确计算（前收*1.1取整）及封板判断（收盘==最高）无法用现有指标精确表达，已用
+  yesterday_up 近似。
+
+  2. 「T日高开」：用 REL_PRICE.open_above_close_pct n=1 value=0.1，表示今日开盘相对前日（即T-1日）收盘涨幅>0.1%（高开）。
+
+  3. 「T日阳线反包且收盘涨幅>0」：用 REL_PRICE.close_above_close_pct n=1 value=0.1 表达T日收盘高于T-1日收盘（涨幅>0）。收盘>开盘（阳线）无法用现有指标直接表达，已省略。
+
+  4. 「T日成交量>T-1日*1.2」：用 VOLUME.surge n=1 value=1.2，即当日量 > 1日均量（即昨日量）× 1.2。
+
+  5. 「T+1日开盘未涨停才可买入」：用 REL_PRICE.open_below_close_pct n=1 value=9.8，表示今日开盘相对昨收涨幅<9.8%（未开盘涨停）。注意该条件与买入信号在同一根K线上判断存在逻辑时序问题，建议在系统回测参数中额外配置「开盘涨停跳过」逻辑。
+
+  【卖出条件说明】
+
+  - 止盈15%、止损-7% 用 PRICE_PCT 相对1日变化近似表达，精确的持仓累计收益需依赖回测引擎内置逻辑。
+
+  - 「持有满3日强制卖出」条件构建器不支持持仓时间计数，已用 LIMIT.prev_up value=3 作为占位规则，实际时间止损请在回测参数 hold_days=3
+  中配置。
+
+  - 「跌停日延迟卖出」逻辑超出条件构建器能力范围，需在回测引擎层面处理。
+
+  - 最多同时持有20只股票、集合竞价模拟等资金管理参数建议在回测引擎参数中单独配置。'

@@ -1,0 +1,63 @@
+id: limitup_fanbao_t1_open_v1
+name: 涨停反包次日开盘买入
+description: 前天涨停、昨日高开阳线反包放量，次日开盘买入，持仓最多3日，止盈15%或止损7%
+buy:
+  logic: AND
+  rules:
+  - indicator: LIMIT
+    op: prev_up
+    params: {}
+    value: 2
+  - indicator: LIMIT
+    op: yesterday_up
+    params: {}
+  - indicator: REL_PRICE
+    op: open_above_close_pct
+    params:
+      n: 1
+    value: 0.0
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 1
+    value: 0.0
+  - indicator: VOLUME_RATIO
+    op: '>'
+    params:
+      n: 1
+    value: 1.2
+sell:
+  logic: OR
+  rules:
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 1
+    value: 15.0
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 1
+    value: -7.0
+notes: '【买入建模说明】
+
+  1. 「T-1日涨停」用 LIMIT.prev_up value=2（前2日内出现过涨停）近似，因为信号日是T日，T-1是前天；同时用 LIMIT.yesterday_up
+  确认昨日（T日）本身不是涨停（反包当日），两者组合隐含「前天涨停、昨天非涨停」的逻辑。注意：条件构建器无法精确区分「恰好是第2天前涨停而非第1天」，此处为最近似表达。
+
+  2. 「T日高开」用 REL_PRICE.open_above_close_pct n=1 value=0.0 表示今日开盘高于前1日收盘（即T日开盘 > T-1收盘）。
+
+  3. 「T日阳线且收盘涨幅>0%（相对T-1收盘）」用 PRICE_PCT.> n=1 value=0.0 表示今日涨幅大于0。阳线（收盘>开盘）条件构建器无独立指标，此处以正涨幅近似，已在notes说明偏差。
+
+  4. 「T日成交量 > T-1日成交量×1.2」用 VOLUME_RATIO.> n=1 value=1.2，即近5日均量/近1日均量>1.2近似放量20%，存在一定误差。
+
+  5. 「T+1开盘买入且开盘涨停则跳过」：条件构建器不支持次日开盘触发与实时成交逻辑，建议在回测参数中设置「开盘价成交」并过滤涨停开盘。
+
+  【卖出建模说明】
+
+  1. 止盈15%和止损7%均用PRICE_PCT实现，n=1表示相对昨收的当日涨跌幅。注意：这是单日涨跌幅而非持仓成本涨跌幅，持仓成本止盈止损需在回测引擎参数中另行设置。
+
+  2. 「最大持有3个交易日强制卖出」条件构建器不支持持仓天数计数，请在回测参数中设置最大持仓周期=3。
+
+  3. 跌停无法卖出的处理属于撮合逻辑，需在回测引擎层面配置，JSON层面无法表达。
+
+  【股票池与持仓】中证500股票池与最大持仓20只需在策略执行参数中配置，不在条件JSON范围内。'

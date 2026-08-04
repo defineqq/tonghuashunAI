@@ -1,0 +1,61 @@
+id: limitup_fanbao_v2
+name: 涨停反包次日买入策略
+description: 昨日涨停（非一字板）、今日高开且收阳反包、量能活跃、今日未涨停，次日开盘买入，持有最多3日，止盈15%或止损7%
+buy:
+  logic: AND
+  rules:
+  - indicator: LIMIT
+    op: yesterday_up
+    params: {}
+  - indicator: REL_PRICE
+    op: open_above_close_pct
+    params:
+      n: 1
+    value: 0.1
+  - indicator: REL_PRICE
+    op: close_above_close_pct
+    params:
+      n: 1
+    value: 0.1
+  - indicator: VOLUME
+    op: surge
+    params:
+      n: 5
+    value: 1.5
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 1
+    value: 9.5
+sell:
+  logic: OR
+  rules:
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 1
+    value: 15.0
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 1
+    value: -7.0
+notes: '【买入条件映射说明】
+
+  1. 「昨日涨停」使用 LIMIT.yesterday_up，而非 LIMIT.up（后者表示今日涨停，两者 AND 会导致零信号）。
+
+  2. 「今日高开」使用 REL_PRICE.open_above_close_pct n=1 value=0.1，即今日开盘价高于昨日收盘价 0.1% 以上（微高开即满足）。
+
+  3. 「今日收盘>今日开盘（收阳反包）且收盘涨幅>0」：现有指标无法直接比较当日开盘与收盘，用 REL_PRICE.close_above_close_pct
+  n=1 value=0.1 近似表达收盘相对昨收上涨，已覆盖条件4；收盘>开盘（阳线）的精确判断无法用现有指标直接表达，已用「今收高于昨收」近似替代，请在回测层额外校验。
+
+  4. 「T日成交量>T-2日成交量1.5倍」使用 VOLUME.surge n=5 value=1.5（近5日均量的1.5倍）近似，原始条件要求与T-2日单日对比，现有指标不支持单日历史量对比，已用近期均量近似。
+
+  5. 「今日未涨停（涨幅<9.9%）」用 PRICE_PCT.< n=1 value=9.5 近似（系统涨停定义为≥9.5%）。
+
+  6. 「非一字板」（当日有开板/分时成交）：现有指标无法精确判断是否一字板，建议在回测层通过「当日最高价>当日最低价」或「换手率>0.5%」额外过滤，此处无法用现有指标表达，已省略。
+
+  【买入执行】T+1日开盘买入、若开盘涨停则不买入：属于执行层逻辑，条件构建器不支持，需在回测引擎参数中设置「次日开盘执行」及「涨停跳过」。
+
+  【卖出条件】止盈15%和止损7%使用 PRICE_PCT 单日涨跌幅近似，精确的盘中分钟级止盈止损需在回测引擎中另行设置。「持有最多3个交易日强制卖出」为时间计数逻辑，条件构建器不支持，请在回测参数里设置
+  max_hold_days=3。跌停无法卖出顺延逻辑同样需在回测引擎层处理。'

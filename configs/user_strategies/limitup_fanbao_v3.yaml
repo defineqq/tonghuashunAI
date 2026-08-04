@@ -1,0 +1,58 @@
+id: limitup_fanbao_v3
+name: 涨停反包次日买入策略
+description: 昨日涨停，今日高开且收阳（反包），量能活跃，次日开盘买入；止盈15%或止损-7%或持有3日卖出
+buy:
+  logic: AND
+  rules:
+  - indicator: LIMIT
+    op: yesterday_up
+  - indicator: REL_PRICE
+    op: open_above_close_pct
+    params:
+      n: 1
+    value: 0.0
+  - indicator: REL_PRICE
+    op: close_above_close_pct
+    params:
+      n: 1
+    value: 0.0
+  - indicator: VOLUME
+    op: surge
+    params:
+      n: 1
+    value: 0.8
+sell:
+  logic: OR
+  rules:
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 1
+    value: 15.0
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 1
+    value: -7.0
+notes: '【买入条件说明】
+
+  1. `LIMIT.yesterday_up`：判定昨日涨停（T-1日收盘涨停），注意不是 LIMIT.up（今日涨停），否则无解。
+
+  2. `REL_PRICE.open_above_close_pct` n=1 value=0.0：今日开盘价高于昨日收盘（高开，value=0表示大于0%即可）。
+
+  3. `REL_PRICE.close_above_close_pct` n=1 value=0.0：今日收盘高于昨日收盘（今日收盘涨幅>0），同时收阳（收盘>开盘）无法直接用现有指标拆分，此处用收盘高于昨收近似代替「收阳+涨幅>0」两个条件，已是最接近的映射。
+
+  4. `VOLUME.surge` n=1 value=0.8：今日成交量 > 昨日成交量×0.8（量能活跃），用N=1日均量基准，value=0.8表示80%。
+
+
+  【卖出条件说明】
+
+  - 止盈：`PRICE_PCT.>` value=15.0，持仓期间涨幅>=15%时触发卖出。
+
+  - 止损：`PRICE_PCT.<` value=-7.0，持仓期间跌幅<=-7%时触发卖出。
+
+  - 「持有最多3个交易日」的时间计数、「次日开盘买入（T+1集合竞价）」、「T+1开盘已涨停则跳过买入」、「跌停日无法卖出延至次日」、「最多持仓20只/资金平均分配」等约束，均无法通过现有条件构建器指标精确表达，建议在回测引擎的执行参数层面（如
+  max_hold_days=3、buy_price=open、skip_if_limit_up=true、defer_sell_on_limit_down=true、max_positions=20）单独配置。
+
+
+  【关键风险提示】收阳（收盘>开盘）条件无法用现有指标直接表达，已用「收盘>昨收」近似；若平台支持自定义公式可补充 close>open 条件。'

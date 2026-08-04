@@ -1,0 +1,41 @@
+id: limitup_fanbao_open_buy_v1
+name: 涨停反包次日开盘买入策略
+description: T-2日真实涨停，T-1日高开且收盘反包（阳线）、收盘高于T-2收盘、量能放大，T日开盘买入；持仓3日或盈利15%或亏损7%卖出
+buy:
+  logic: AND
+  rules:
+  - indicator: LIMIT
+    op: yesterday_up
+    params: {}
+  - indicator: REL_PRICE
+    op: open_above_close_pct
+    params:
+      n: 1
+    value: 0.0
+  - indicator: REL_PRICE
+    op: close_above_close_pct
+    params:
+      n: 1
+    value: 0.0
+  - indicator: VOLUME
+    op: surge
+    params:
+      n: 5
+    value: 1.5
+sell:
+  logic: OR
+  rules:
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 1
+    value: 15.0
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 1
+    value: -7.0
+notes: 【买入条件说明】①`LIMIT.yesterday_up` 判定昨日（T-2）真实涨停，对应条件1；②`REL_PRICE.open_above_close_pct`
+  n=1 value=0.0 判断今日（T-1）开盘高于昨日收盘，即高开，对应条件2；③`REL_PRICE.close_above_close_pct` n=1
+  value=0.0 判断今日收盘高于昨日收盘（正收益），对应条件4；④`VOLUME.surge` n=5 value=1.5 判断今日量 > 5日均量1.5倍，对应条件5。【无法精确表达的条件】条件3「今日收盘
+  > 今日开盘（阳线）」现有指标目录中没有直接的「今收 vs 今开」比较指标，已省略，建议在回测引擎层补充过滤逻辑；「T日开盘买入且涨停跳过」属于执行层逻辑，条件构建器不支持，建议在回测参数中设置「按开盘价成交，涨停无法买入则跳过」。【卖出条件说明】保留止盈15%和止损7%两条核心规则，采用OR逻辑先触发先卖；「持有3个交易日后卖出」属于时间计数逻辑，现有指标无法表达，建议在回测参数里设置最大持仓天数=3；跌停无法卖出的挂单等待逻辑同样属于执行层，需在回测引擎中处理。

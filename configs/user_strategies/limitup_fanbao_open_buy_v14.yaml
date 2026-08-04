@@ -1,0 +1,64 @@
+id: limitup_fanbao_open_buy_v14
+name: 涨停反包次日买入策略
+description: T-1日涨停封板，T日高开反包且量能活跃，T+1日开盘限价买入；止盈15%或止损7%或持满3日后次日开盘卖出
+buy:
+  logic: AND
+  rules:
+  - indicator: LIMIT
+    op: yesterday_up
+    params: {}
+  - indicator: REL_PRICE
+    op: open_above_close_pct
+    params:
+      n: 1
+    value: 0.1
+  - indicator: REL_PRICE
+    op: close_above_close_pct
+    params:
+      n: 1
+    value: 0.1
+  - indicator: VOLUME
+    op: surge
+    params:
+      n: 1
+    value: 0.8
+sell:
+  logic: OR
+  rules:
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 1
+    value: 15.0
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 1
+    value: -7.0
+notes: '【买入条件说明】
+
+  1. `LIMIT.yesterday_up`：判定昨日（T-1日）涨停，对应策略中T-1日涨停封板条件。涨停价封板（收盘==最高==涨停价）无法精确区分，已用yesterday_up近似。
+
+  2. `REL_PRICE.open_above_close_pct` n=1 value=0.1：今日开盘价高于昨日收盘价0.1%以上，模拟T日高开条件（阈值取0.1%表示微幅高开即满足）。
+
+  3. `REL_PRICE.close_above_close_pct` n=1 value=0.1：今日收盘高于昨日收盘0.1%以上，模拟T日反包（收盘涨幅>0）。注意：收盘>开盘（阳线）无法直接判断，已用「收盘高于T-1收盘」近似，与高开条件联合可大体覆盖反包形态。
+
+  4. `VOLUME.surge` n=1 value=0.8：当日量>前1日量×0.8，模拟T日成交量>T-1日成交量*0.8的量能活跃条件。
+
+
+  【卖出条件说明】
+
+  1. `PRICE_PCT.>` value=15.0：收益>=15%时触发止盈（次日开盘卖出由回测引擎执行）。
+
+  2. `PRICE_PCT.<` value=-7.0：亏损>=-7%时触发止损。
+
+  3. 持有满3个交易日后第4日开盘卖出：条件构建器不支持时间计数，请在回测参数中单独设置 hold_days=3 最大持仓天数限制。
+
+
+  【无法精确映射的条件】
+
+  - T+1日开盘即涨停则放弃买入：条件构建器暂无「过滤T+1日开盘涨停」的机制，建议在回测引擎层面加判断：若T+1开盘价>=前收*1.099则跳过。
+
+  - 卖出日跌停无法卖出继续持有：同上，属于订单执行层逻辑，需在回测引擎中处理，策略JSON层无法表达。
+
+  - 「收盘价>开盘价」（阳线体）无对应指标，已用收盘高于昨收近似替代。'

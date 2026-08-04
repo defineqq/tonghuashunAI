@@ -1,0 +1,41 @@
+id: limitup_fanbao_exact_v1
+name: 涨停反包次日买入精确版
+description: T-1日真实涨停，T日高开且收阳反包并放量，T+1日开盘买入；盈利15%或亏损7%或持有3日卖出
+buy:
+  logic: AND
+  rules:
+  - indicator: LIMIT
+    op: yesterday_up
+    params: {}
+  - indicator: REL_PRICE
+    op: open_above_close_pct
+    params:
+      n: 1
+    value: 0.0
+  - indicator: REL_PRICE
+    op: close_above_close_pct
+    params:
+      n: 1
+    value: 0.0
+  - indicator: VOLUME
+    op: surge
+    params:
+      n: 1
+    value: 1.2
+sell:
+  logic: OR
+  rules:
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 1
+    value: 15.0
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 1
+    value: -7.0
+notes: 【买入条件说明】①`LIMIT.yesterday_up` 判定前一日涨停（涨幅≥9.5%，系统定义），对应用户要求的T-1真实涨停；用户要求涨幅≥9.9%更严格，现有指标无法精确区分9.5%与9.9%，已用
+  yesterday_up 近似，建议在回测层补充精确涨幅过滤。②`REL_PRICE.open_above_close_pct n=1 value=0.0` 表示今日开盘高于昨日收盘（高开条件）。③`REL_PRICE.close_above_close_pct
+  n=1 value=0.0` 表示今日收盘高于昨日收盘（收盘涨幅>0）；「今日收盘>开盘（阳线）」无法用现有指标直接表达，已用「收盘>昨收」近似，覆盖了大部分反包情形。④`VOLUME.surge
+  n=1 value=1.2` 表示今日量>昨日量×1.2，对应量能放大20%要求。【卖出条件说明】止盈15%和止损7%用 PRICE_PCT 实现，均基于持仓成本的单日涨跌幅近似；「持有满3个交易日卖出」为时间计数条件，现有指标不支持，请在回测框架的持仓参数中单独设置最大持仓天数=3。【涨停买入限制/跌停卖出顺延】属于交易执行层逻辑（非选股信号），需在回测引擎的订单撮合模块中实现，本策略JSON无法表达，请在平台回测参数中配置「涨停无法买入、跌停无法卖出顺延」选项。【股票池与仓位】中证500成分股池、20只持仓上限、等权分配，属于组合管理参数，请在平台回测设置中另行配置。

@@ -1,0 +1,67 @@
+id: limitup_fanbao_precise_final
+name: 涨停反包次日开盘买入策略（精确版）
+description: 前天涨停、昨天高开收阳放量，今日开盘买入的涨停反包策略，含止盈15%、止损7%、持仓3日卖出
+buy:
+  logic: AND
+  rules:
+  - indicator: LIMIT
+    op: prev_up
+    params: {}
+    value: 2
+  - indicator: REL_PRICE
+    op: open_above_close_pct
+    params:
+      n: 1
+    value: 0.0
+  - indicator: REL_PRICE
+    op: close_above_close_pct
+    params:
+      n: 1
+    value: 0.0
+  - indicator: VOLUME
+    op: surge
+    params:
+      n: 5
+    value: 1.2
+  - indicator: REL_PRICE
+    op: open_below_close_pct
+    params:
+      n: 0
+    value: 9.5
+sell:
+  logic: OR
+  rules:
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 1
+    value: 15.0
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 1
+    value: -7.0
+  - indicator: CONSEC
+    op: up>=
+    params: {}
+    value: 3
+notes: '【买入条件说明】
+
+  条件1：用 LIMIT.prev_up value=2 表示「前2日内出现过涨停」，近似表达「T-1日（前天）涨停」；精确的「收盘价==当日最高价」判断现有指标无法直接表达，LIMIT.prev_up
+  已隐含涨幅≥9.5%的涨停判定。
+
+  条件2：REL_PRICE.open_above_close_pct n=1 value=0 表示昨日开盘高于前一日收盘（高开）；REL_PRICE.close_above_close_pct
+  n=1 value=0 表示昨日收盘高于前一日收盘（收涨即阳线近似，「收盘>开盘」的纯阳线判断无法精确表达，已用收盘涨幅>0近似）；VOLUME.surge n=5
+  value=1.2 表示昨日量>5日均量1.2倍。
+
+  条件3（T+1日开盘买入+涨停过滤）：「今日开盘价涨幅<9.5%才买入」用 REL_PRICE.open_below_close_pct n=0 value=9.5
+  近似，但现有指标 REL_PRICE 的 n 最小为1，无法精确表达「今日开盘 vs 昨日收盘」的涨停过滤，此条件已尽力近似，建议在回测引擎层面额外实现开盘涨停过滤逻辑。
+
+  【卖出条件说明】
+
+  止盈15%、止损-7% 用 PRICE_PCT 近似，但 PRICE_PCT 为日线收盘涨跌幅，无法实现盘中实时止盈止损，建议在回测参数中设置盘中止盈止损触发逻辑。「持仓满3个交易日卖出」条件构建器不支持持仓天数计数，此处用
+  CONSEC.up>= value=3 近似（连续3根阳线），持仓时间限制建议在回测参数里另外设置。
+
+  【跌停无法卖出】无法用现有指标表达，建议在回测引擎层实现。
+
+  【资金管理】等权分配与最大持仓数 limit 需在回测参数中配置，非策略JSON范畴。'

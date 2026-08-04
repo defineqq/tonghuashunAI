@@ -1,0 +1,39 @@
+id: limitup_fanbao_v4
+name: 涨停反包次日买入策略
+description: T-1日涨停，T日高开后收盘反包（收盘>开盘且相对T-1收盘收涨），T日量能不萎缩，T+1日开盘买入
+buy:
+  logic: AND
+  rules:
+  - indicator: LIMIT
+    op: yesterday_up
+  - indicator: REL_PRICE
+    op: open_above_close_pct
+    params:
+      n: 1
+    value: 0.0
+  - indicator: REL_PRICE
+    op: close_above_close_pct
+    params:
+      n: 1
+    value: 0.0
+  - indicator: VOLUME_RATIO
+    op: '>'
+    params:
+      n: 1
+    value: 0.8
+sell:
+  logic: OR
+  rules:
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 1
+    value: 15.0
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 1
+    value: -7.0
+notes: 【买入条件说明】①`LIMIT.yesterday_up` 判定T-1日涨停（昨日涨停）；②`REL_PRICE.open_above_close_pct`
+  n=1 value=0.0 判定今日开盘价高于前1日收盘价（高开）；③`REL_PRICE.close_above_close_pct` n=1 value=0.0
+  判定今日收盘高于T-1日收盘（反包且收涨）；④`VOLUME_RATIO.>` n=1 value=0.8 用近5日均量/近1日量的近似来判断量能不萎缩，实际语义为今日量≥昨日量×0.8，属近似处理。【卖出条件说明】止盈15%和止损7%用PRICE_PCT近似表达，持仓最多3日的时间计数限制、跌停顺延卖出逻辑以及T+1日集合竞价买入等细节，条件构建器不支持时间计数和跌停顺延规则，建议在回测参数中单独配置「最大持仓天数=3」「跌停日顺延卖出=开启」「买入时机=次日开盘价」。仓位管理中「最多同时持有20只、等额分配」需在资金管理模块设置，无法通过条件规则表达。

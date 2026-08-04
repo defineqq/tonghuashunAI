@@ -1,0 +1,62 @@
+id: limitup_fanbao_sim_v11
+name: 涨停反包次日买入策略
+description: 昨日涨停封板，今日高开收阳（反包形态）且量能活跃，次日开盘买入；15%止盈、7%止损或持满3日卖出
+buy:
+  logic: AND
+  rules:
+  - indicator: LIMIT
+    op: yesterday_up
+    params: {}
+  - indicator: REL_PRICE
+    op: open_above_close_pct
+    params:
+      n: 1
+    value: 0.0
+  - indicator: REL_PRICE
+    op: close_above_close_pct
+    params:
+      n: 1
+    value: 0.0
+  - indicator: VOLUME_RATIO
+    op: '>'
+    params:
+      n: 1
+    value: 0.8
+sell:
+  logic: OR
+  rules:
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 1
+    value: 15.0
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 1
+    value: -7.0
+  - indicator: HIGH_LOW_N
+    op: new_low
+    params:
+      n: 3
+notes: '【指标映射说明】
+
+  1. 昨日涨停封板（T-1涨停且收盘=最高价）：`LIMIT.yesterday_up` 覆盖「昨日涨停」语义；「收盘等于最高价（封板确认）」现有指标目录中无精确封板判断，已用
+  `LIMIT.yesterday_up` 近似（该 op 本身意味着昨日收盘时完成涨停）。
+
+  2. 今日高开（open > 昨收）：`REL_PRICE.open_above_close_pct` n=1 value=0.0，即今日开盘/昨收-1 > 0%。
+
+  3. 今日收阳且收盘>昨收：`REL_PRICE.close_above_close_pct` n=1 value=0.0，即今收>昨收；「收盘>今开」的收阳形态在现有指标中无直接
+  op，已用「今收>昨收」近似（含义略宽），请在 notes 里知悉。
+
+  4. 今日量 > 昨日量×0.8：`VOLUME_RATIO.>` n=1 value=0.8（近5日均量/近N日均量，此处 n=1 时退化为今日量/昨日量的比值近似），用以判断量能活跃。
+
+  5. 「T+1日开盘买入」及「开盘即涨停则跳过」：条件构建器的买入信号在 T 日收盘后产生、T+1 日开盘执行，T+1 开盘涨停的过滤逻辑需在回测引擎层面设置「涨停无法买入」，JSON
+  规则层无法直接表达，建议在回测参数中启用「涨停不可买入」开关。
+
+  6. 止盈15%/止损7%：`PRICE_PCT.>` value=15.0 止盈，`PRICE_PCT.<` value=-7.0 止损，n=1 表示相对前1日。
+
+  7. 持满3日卖出：条件构建器不支持持仓天数计数，已用 `HIGH_LOW_N.new_low` n=3 作为兜底近似（3日创新低时离场），精确的「持满3日」逻辑请在回测参数
+  hold_days=3 中另行设置。
+
+  8. 跌停无法卖出延续到次日：此为撮合层逻辑，条件构建器不支持，需在回测引擎的「跌停不可卖出」选项中配置。'

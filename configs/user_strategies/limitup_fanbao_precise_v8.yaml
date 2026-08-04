@@ -1,0 +1,43 @@
+id: limitup_fanbao_precise_v8
+name: 涨停反包次日买入策略（精细模拟版）
+description: T-1日涨停、T日高开收阳放量反包，T+1日开盘买入，持仓最多3日，止盈15%止损7%
+buy:
+  logic: AND
+  rules:
+  - indicator: LIMIT
+    op: yesterday_up
+    params: {}
+  - indicator: REL_PRICE
+    op: open_above_close_pct
+    params:
+      n: 1
+    value: 0.0
+  - indicator: REL_PRICE
+    op: close_above_close_pct
+    params:
+      n: 1
+    value: 0.0
+  - indicator: VOLUME
+    op: surge
+    params:
+      n: 1
+    value: 1.2
+sell:
+  logic: OR
+  rules:
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 1
+    value: 15.0
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 1
+    value: -7.0
+notes: 【买入条件说明】①`LIMIT.yesterday_up` 判断昨日(T-1)涨停，注意不是 LIMIT.up（当日涨停），否则永远无法成交。②`REL_PRICE.open_above_close_pct
+  n=1 value=0.0` 模拟T日开盘价高于T-1日收盘（高开）。③`REL_PRICE.close_above_close_pct n=1 value=0.0`
+  模拟T日收盘高于T-1日收盘（收阳且日涨幅>0）。④`VOLUME.surge n=1 value=1.2` 模拟T日成交量>T-1日成交量×1.2。以上4条均为AND关系，信号在T日收盘后确认，T+1日开盘执行买入。【重要近似说明】(a)
+  'T日收盘价>开盘价（阳线实体）' 与 'T日收盘>T-1收盘' 在条件构建器中只能用REL_PRICE对前一日收盘做比较，无法直接比较当日开盘与收盘，已用close_above_close_pct近似替代；(b)
+  'T+1日若连板则跳过' 的逻辑（开盘价=涨停价视为无法买入）条件构建器不支持开盘价等于涨停价的精确判断，建议在回测引擎层面单独实现该过滤逻辑；(c) '持有最多3个交易日'、'跌停顺延卖出'、'等仓位分配'、'最多同时持有N只'、'股票池中证500'
+  均属于回测框架参数，条件构建器无对应指标，需在回测系统的持仓管理、资金管理、股票池筛选模块中配置；(d) 止盈止损基于持仓成本计算，条件构建器中PRICE_PCT为当日相对N日前收盘涨跌幅，设n=1作为近似日内及短期止盈止损触发信号，精确的持仓浮盈亏止盈止损需在回测引擎层实现。

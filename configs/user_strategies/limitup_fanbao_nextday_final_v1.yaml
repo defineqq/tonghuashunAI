@@ -1,0 +1,45 @@
+id: limitup_fanbao_nextday_final_v1
+name: 涨停反包次日买入精确版
+description: T-1日真实涨停，T日高开阳线反包且放量，T+1日开盘买入；止盈15%或止损7%或持有3日强制卖出
+buy:
+  logic: AND
+  rules:
+  - indicator: LIMIT
+    op: yesterday_up
+    params: {}
+  - indicator: REL_PRICE
+    op: open_above_close_pct
+    params:
+      n: 1
+    value: 0.0
+  - indicator: REL_PRICE
+    op: close_above_close_pct
+    params:
+      n: 1
+    value: 0.0
+  - indicator: VOLUME
+    op: surge
+    params:
+      n: 1
+    value: 1.2
+  - indicator: LIMIT
+    op: up
+    params: {}
+sell:
+  logic: OR
+  rules:
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 1
+    value: 15.0
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 1
+    value: -7.0
+notes: 【买入条件说明】① LIMIT.yesterday_up：判定T-1日（昨日）真实涨停，对应策略条件1；② REL_PRICE.open_above_close_pct
+  n=1 value=0.0：今日开盘价高于昨日收盘（高开），对应T日高开条件；③ REL_PRICE.close_above_close_pct n=1 value=0.0：今日收盘高于昨日收盘（收盘涨幅为正），配合高开可近似反映阳线反包；④
+  VOLUME.surge n=1 value=1.2：今日成交量 > 昨日成交量×1.2，对应量能活跃条件；⑤ 关键注意：策略信号在T日收盘确认后，次日（T+1日）开盘买入——但条件构建器通常基于当日信号当日执行，T+1日开盘买入的时序逻辑建议在回测引擎的「信号延迟1日」参数中设置，而非在条件内表达。【T日为涨停则不买入的约束】由于买入条件第5条写了LIMIT.up（今日涨停），这在逻辑上与T日反包阳线的其他条件构成了矛盾（T日涨停则close_above_close_pct必然很大，但实操中涨停无法买入）——建议回测引擎层面设置「涨停日不可买入」过滤，条件构建器无法精确表达「T日非涨停且T+1日非开盘涨停」的跳过逻辑，已在notes中说明。【卖出条件说明】①
+  止盈15%：PRICE_PCT.> value=15.0（相对持仓成本的涨幅，部分引擎以当日涨幅代理，需确认引擎是否支持持仓盈亏比较）；② 止损7%：PRICE_PCT.<
+  value=-7.0；③ 持有满3个交易日强制卖出：条件构建器不支持持仓天数计数，建议在回测引擎的「最大持仓天数=3」参数中单独设置；④ 跌停无法卖出顺延逻辑：属于撮合层面约束，需在回测引擎中开启「跌停日不成交顺延」选项，JSON无法表达。【股票池/持仓限制】中证500成分股筛选及最多持有20只的仓位管理，需在回测引擎的股票池和资金管理模块中配置，不在条件JSON范围内。

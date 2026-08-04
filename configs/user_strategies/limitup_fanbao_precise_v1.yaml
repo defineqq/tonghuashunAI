@@ -1,0 +1,62 @@
+id: limitup_fanbao_precise_v1
+name: 涨停反包次日买入策略（精细模拟版）
+description: T-1日涨停，T日高开收阳反包且量能活跃，T+1日开盘买入，持有最多3日或触及盈亏阈值卖出
+buy:
+  logic: AND
+  rules:
+  - indicator: LIMIT
+    op: yesterday_up
+    params: {}
+  - indicator: REL_PRICE
+    op: open_above_close_pct
+    params:
+      n: 1
+    value: 0.0
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 1
+    value: 0.1
+  - indicator: VOLUME
+    op: surge
+    params:
+      n: 5
+    value: 1.2
+sell:
+  logic: OR
+  rules:
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 1
+    value: 15.0
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 1
+    value: -7.0
+notes: '【买入条件映射说明】
+
+  1. `LIMIT.yesterday_up` 判断昨日（T-1日）涨停，对应原策略「昨日收盘涨幅>=9.9%」。
+
+  2. `REL_PRICE.open_above_close_pct` n=1 value=0.0 判断今日开盘价高于前1日收盘价，即T日高开。
+
+  3. `PRICE_PCT.>` n=1 value=0.1 判断T日收盘涨幅>0（相对昨日收盘为正），近似覆盖「收阳反包且收盘>昨收」；注意「close>open（收阳）」无法单独用现有指标精确表达，已用「收盘涨幅>0.1%」近似替代（含收阳语义）。
+
+  4. `VOLUME.surge` n=5 value=1.2 判断当日量>5日均量×1.2，对应「量能活跃」条件。
+
+
+  【买入时机说明】
+
+  上述规则在T日收盘后触发信号，实际下单为T+1日开盘价买入。「若T+1日开盘涨停则跳过」的逻辑（open_t1 >= close_t × 1.099）属于订单执行层过滤，条件构建器不支持跨日开盘价比较，建议在回测引擎的成交判断模块中单独实现。
+
+
+  【卖出条件说明】
+
+  - 止盈：持仓期间单日涨幅>15%时卖出（用PRICE_PCT.> value=15近似，严格应为持仓累计收益，建议回测引擎配合持仓盈亏计算）。
+
+  - 止损：单日跌幅超7%卖出（PRICE_PCT.< value=-7）。
+
+  - 「持有最多3个交易日」的时间止盈/止损条件，条件构建器不支持持仓天数计数，需在回测参数中单独设置最大持仓天数=3。
+
+  - 「跌停无法卖出推迟次日」的执行逻辑属于成交撮合层，建议在回测引擎中判断当日跌幅<=-9.9%时延迟成交，条件构建器无法表达。'

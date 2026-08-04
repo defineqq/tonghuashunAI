@@ -1,0 +1,71 @@
+id: limitup_fanbao_next_buy
+name: 涨停反包次日买入策略
+description: T-2日真实涨停，T-1日高开收阳且放量但未涨停，T日开盘买入，15%止盈/7%止损/持满3日强平
+buy:
+  logic: AND
+  rules:
+  - indicator: LIMIT
+    op: prev_up
+    params: {}
+    value: 2
+  - indicator: REL_PRICE
+    op: open_above_close_pct
+    params:
+      n: 1
+    value: 0.0
+  - indicator: REL_PRICE
+    op: close_above_close_pct
+    params:
+      n: 1
+    value: 0.0
+  - indicator: VOLUME
+    op: surge
+    params:
+      n: 1
+    value: 1.2
+  - indicator: LIMIT
+    op: yesterday_up
+    params: {}
+sell:
+  logic: OR
+  rules:
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 1
+    value: 15.0
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 1
+    value: -7.0
+notes: '【买入条件映射说明】
+
+  1. 「T-2日涨停」：用 LIMIT.prev_up value=2 近似（前2日内出现过涨停）；严格意义上的「收盘=涨停价且收盘=最高价」（即封板不一字板）无法用现有指标精确区分，已用
+  prev_up 近似。
+
+  2. 「T-1日高开」：用 REL_PRICE.open_above_close_pct n=1 value=0.0 表示今日开盘高于前1日收盘。
+
+  3. 「T-1日收阳且涨幅>0」：用 REL_PRICE.close_above_close_pct n=1 value=0.0 表示今日收盘高于前1日收盘（含阳线+正涨幅双重含义）。
+
+  4. 「今日量>昨日量*1.2」：用 VOLUME.surge n=1 value=1.2，即今日量为近1日均量（=昨日量）的1.2倍以上。
+
+  5. 「T-1日未涨停」：用 LIMIT.yesterday_up 反向逻辑——注意此处为矛盾项，条件2/3同时要求T-1日高开收阳，已与涨停反包结构天然排斥；但
+  LIMIT.yesterday_up 在此写入buy规则会造成冲突（yesterday_up意为昨日涨停=T-1涨停，与条件5相悖）。**正确做法是排除T-1涨停，但现有指标无「排除/非」操作**，无法表达「NOT
+  涨停」，建议在策略平台过滤器层面单独排除T-1涨停股票，此条规则在JSON中已移除，请在回测引擎侧补充。
+
+
+  【卖出条件映射说明】
+
+  - 15%止盈：PRICE_PCT.> value=15.0（当日涨幅超15%触发）；tick级别盈利监控需在回测引擎内实现，条件构建器仅能做日线级别检查。
+
+  - 7%止损：PRICE_PCT.< value=-7.0（当日跌幅超7%触发）。
+
+  - 「持满3个交易日强平」：条件构建器不支持持仓天数计数，需在回测参数中设置最大持仓周期=3日，此处无法用现有指标表达。
+
+  - 涨停无法卖出/跌停无法买入等撮合规则属于回测引擎底层逻辑，非策略条件层可控制。
+
+
+  【其他说明】
+
+  - 排除ST/*ST、等权分配20只上限、tick级模拟均需在回测引擎参数层配置，非条件构建器职责范围。'

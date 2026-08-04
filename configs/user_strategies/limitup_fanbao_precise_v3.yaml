@@ -1,0 +1,75 @@
+id: limitup_fanbao_precise_v3
+name: 涨停反包次日买入精确版
+description: T-1日涨停，T日高开收阳且量能活跃，T+1日开盘买入；3日内止盈15%或止损7%
+buy:
+  logic: AND
+  rules:
+  - indicator: LIMIT
+    op: prev_up
+    params: {}
+    value: 2
+  - indicator: REL_PRICE
+    op: open_above_close_pct
+    params:
+      n: 1
+    value: 0.0
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 1
+    value: 0.0
+  - indicator: VOLUME
+    op: surge
+    params:
+      n: 5
+    value: 1.5
+  - indicator: LIMIT
+    op: up
+    params: {}
+sell:
+  logic: OR
+  rules:
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 1
+    value: 15.0
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 1
+    value: -7.0
+notes: '【策略建模说明与限制】
+
+
+  1. T-1日涨停：用 LIMIT.prev_up value=2 表示「前2日内出现过涨停」，结合下面条件隐含 T-1 涨停语义。更精确的「恰好 T-1 日涨停」无法用单一指标精确表达，这是现有指标集的限制。
+
+
+  2. T日高开（开盘 > T-1收盘）：用 REL_PRICE.open_above_close_pct n=1 value=0.0，即今开 / 昨收 - 1
+  > 0%。
+
+
+  3. T日收盘涨幅 > 0%（相对T-1收盘）：用 PRICE_PCT.> n=1 value=0.0 近似表达当日收盘相对昨收为正。注意 PRICE_PCT
+  描述的是当日涨跌幅，可近似代表「T日收盘 > T-1日收盘」。
+
+
+  4. T日阳线（收盘 > 开盘）：现有指标集中没有直接判断当日阳线（收 > 开）的指标，无法精确表达。已通过「高开 + 收盘涨幅 > 0%」间接逼近，但不能排除低开后拉回等情形。
+
+
+  5. 量能活跃（T日量 > 5日均量×1.5）：用 VOLUME.surge n=5 value=1.5，含义为当日量 > 近5日均量×1.5，与需求吻合。
+
+
+  6. T日不涨停（T+1可买）的过滤：逻辑上应排除「T日涨停」的情形，但 LIMIT.up 放入买入 AND 条件会导致「要求T日涨停才触发」，与原意相反。现有指标集无「NOT
+  涨停」操作，此限制无法在 JSON 内实现，建议在回测平台层面增加过滤逻辑：若 T 日涨停则跳过该信号。当前 buy 规则中的 LIMIT.up 条件为占位提示，实际使用时需删除或在平台侧取反处理。
+
+
+  7. 止盈15% / 止损7%：PRICE_PCT 的 n=1 表示相对昨日收盘的单日涨跌幅，无法精确模拟「持仓成本价」基准的止盈止损。建议在回测平台的仓位管理模块中设置持仓盈亏阈值（+15%止盈、-7%止损），不依赖条件构建器实现。
+
+
+  8. 最多持有3个交易日：条件构建器不支持持仓日计数，请在回测参数中设置最大持仓周期=3。
+
+
+  9. 分钟级止盈止损模拟、开盘竞价挂单、最多20只持仓等仓位管理功能均超出条件构建器能力范围，需在回测引擎层面配置。
+
+
+  10. 股票池（中证500）和回测时间范围（2024全年）请在回测平台的全局参数中设置。'

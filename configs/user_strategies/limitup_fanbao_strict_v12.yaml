@@ -1,0 +1,75 @@
+id: limitup_fanbao_strict_v12
+name: 涨停反包次日买入精细版
+description: 前天涨停、昨日高开阳线反包放量，今日开盘买入；15%止盈或7%止损或持3日离场
+buy:
+  logic: AND
+  rules:
+  - indicator: LIMIT
+    op: prev_up
+    params: {}
+    value: 2
+  - indicator: REL_PRICE
+    op: open_above_close_pct
+    params:
+      n: 2
+    value: 0.1
+  - indicator: REL_PRICE
+    op: close_above_close_pct
+    params:
+      n: 2
+    value: 0.1
+  - indicator: VOLUME
+    op: surge
+    params:
+      n: 1
+    value: 1.2
+  - indicator: LIMIT
+    op: yesterday_up
+    params: {}
+sell:
+  logic: OR
+  rules:
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 1
+    value: 14.0
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 1
+    value: -7.0
+  - indicator: ATR
+    op: stop_hit
+    params:
+      n: 3
+    value: 1.5
+notes: '【买入条件映射说明】
+
+  1. 「前天涨停」用 LIMIT.prev_up value=2 表达（前2日内出现过涨停）；但由于 prev_up 是「前N日内曾涨停」，无法精确指定「恰好第2天」，这是现有指标的近似。
+
+  2. 「昨日高开（T-1开盘>T-2收盘）」用 REL_PRICE.open_above_close_pct n=2 value=0.1 近似（今日开盘高于2日前收盘0.1%）。
+
+  3. 「T-1收盘>T-2收盘（阳线/反包涨幅>0）」用 REL_PRICE.close_above_close_pct n=2 value=0.1 近似。
+
+  4. 「T-1成交量>T-2成交量×1.2」用 VOLUME.surge n=1 value=1.2（当日量>1日均量×1.2）近似。
+
+  5. 「T-1为阳线（收>开）」条件构建器无法直接比较同日开收盘，无法精确映射，已省略，靠条件3（收盘高于前日收盘）间接过滤。
+
+  6. 「T日开盘涨停则跳过」（即今日不涨停）用 LIMIT.yesterday_up 配合逻辑：当前不触发 LIMIT.up 来过滤，但构建器无法做「非涨停」的否定条件，此处已在
+  notes 提示，建议回测层面排除今日涨停个股。
+
+
+  【卖出条件映射说明】
+
+  1. 「止盈15%」用 PRICE_PCT.> value=14.0 近似（涨幅超14%触发，模拟最高价15%止盈略低一档，因指标用收盘/日内价格，乘以0.99后约14%）。
+
+  2. 「止损-7%」用 PRICE_PCT.< value=-7.0。
+
+  3. 「持有3日强制卖出」构建器不支持持仓计数，用 ATR.stop_hit n=3 value=1.5 作为追踪止损兜底，实际持仓天数限制建议在回测参数中单独设置
+  max_hold_days=3。
+
+  4. 「跌停顺延卖出」、「涨停保护」、「最高价×0.99/最低价×1.01成交」等精细执行逻辑属于回测引擎层面功能，构建器层面无法表达，建议在回测配置中开启跌涨停滑点保护。
+
+
+  【股票池与排序】中证500成分股过滤及按量能放大倍数排序需在条件构建器的「股票池」和「排序规则」模块单独配置，无法写入策略JSON。'

@@ -1,0 +1,72 @@
+id: limitup_fanbao_v5
+name: 涨停反包策略（精细模拟版）
+description: T-1日涨停封板，T日高开且收红反包（未再涨停、量能活跃），T+1日开盘非涨停状态下以开盘价买入，持有最多3个交易日，15%止盈/7%止损
+buy:
+  logic: AND
+  rules:
+  - indicator: LIMIT
+    op: yesterday_up
+    params: {}
+  - indicator: REL_PRICE
+    op: open_above_close_pct
+    params:
+      n: 1
+    value: 0.0
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 1
+    value: 0.0
+  - indicator: VOLUME
+    op: surge
+    params:
+      n: 1
+    value: 1.2
+  - indicator: LIMIT
+    op: prev_up
+    params: {}
+    value: 1
+sell:
+  logic: OR
+  rules:
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 1
+    value: 15.0
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 1
+    value: -7.0
+  - indicator: HIGH_LOW_N
+    op: new_low
+    params:
+      n: 3
+notes: '【买入条件映射说明】
+
+  1. 「昨日涨停」→ LIMIT.yesterday_up（非 LIMIT.up，后者表示今日涨停，两者 AND 永远无解）。
+
+  2. 「今日高开」→ REL_PRICE.open_above_close_pct n=1 value=0.0（开盘价高于前1日收盘价）。
+
+  3. 「收盘反包（收盘>开盘且涨幅>0%）」→ PRICE_PCT.> value=0.0（今日收盘涨幅>0%，结合高开已隐含收盘>开盘方向，精确的「收盘>开盘」无独立指标，此处近似）。
+
+  4. 「今日成交量>昨日成交量×1.2」→ VOLUME.surge n=1 value=1.2（以1日均量为基准，倍数1.2）。
+
+  5. 「今日收盘未涨停」→ 无法用现有指标直接表达「今日非涨停」的否定条件；策略层面通过 LIMIT.prev_up value=1 确认前1日（即T-1）有涨停信号，T日本身是否涨停的排除逻辑建议在回测引擎过滤层处理（过滤掉当日涨幅>=9.9%的标的）。
+
+  6. 「T+1日开盘买入且非涨停」→ 条件构建器信号在T日收盘后触发，T+1开盘执行；若T+1开盘即涨停的跳过逻辑需在回测引擎层实现，JSON层无法表达。
+
+
+  【卖出条件映射说明】
+
+  - 15%止盈 → PRICE_PCT.> value=15.0（当日涨幅达15%触发，若当日涨停无法成交需引擎层处理等待涨停打开）。
+
+  - 7%止损 → PRICE_PCT.< value=-7.0（当日跌幅达-7%触发，跌停无法成交同上）。
+
+  - 持有3日到期 → HIGH_LOW_N.new_low n=3 作为时间到期的近似替代；精确的「持有N日强制平仓」属于持仓管理逻辑，条件构建器无对应指标，建议在回测参数中设置最大持仓天数=3。
+
+  - 涨跌停时无法卖出、等打开再卖的逻辑需回测引擎支持，JSON层无法编码。
+
+
+  【股票池 & 仓位】中证500成分股筛选、最大20只持仓、分钟级/tick级检查止盈止损均为回测引擎参数，不在条件构建器 JSON 范围内，请在回测配置中单独设置。'

@@ -1,0 +1,61 @@
+id: limitup_fanbao_tick_v7
+name: 涨停反包次日买入策略
+description: 昨日涨停、今日高开且收盘反包放量，次日开盘买入；设置止盈15%、止损-7%或持有3日强制卖出
+buy:
+  logic: AND
+  rules:
+  - indicator: LIMIT
+    op: yesterday_up
+  - indicator: REL_PRICE
+    op: open_above_close_pct
+    params:
+      n: 1
+    value: 0.1
+  - indicator: REL_PRICE
+    op: close_above_close_pct
+    params:
+      n: 1
+    value: 0.1
+  - indicator: VOLUME
+    op: surge
+    params:
+      n: 20
+    value: 1.5
+sell:
+  logic: OR
+  rules:
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 1
+    value: 15.0
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 1
+    value: -7.0
+notes: '【买入条件映射说明】
+
+  1. 「T-1日涨停」→ LIMIT.yesterday_up（注意：不能用 LIMIT.up，否则表示今日涨停，逻辑冲突）。
+
+  2. 「T日高开（开盘>昨收）」→ REL_PRICE.open_above_close_pct n=1 value=0.1，即今开高于昨收0.1%以上（近似高开，0.1%为最小正值判定）。
+
+  3. 「T日收盘反包（收盘>开盘且收盘涨幅>0）」→ 现有指标无法同时判断「收盘>开盘」和「收盘>昨收」两个条件的组合。此处用 REL_PRICE.close_above_close_pct
+  n=1 value=0.1 近似「收盘高于昨收」，「收盘>开盘（阳线）」无法用现有指标精确表达，已忽略，建议在条件构建器外层补充阳线过滤。
+
+  4. 「T日量>T-2日量×1.5」→ 现有指标无法精确对比T日与T-2日单日成交量。已用 VOLUME.surge n=20 value=1.5 近似（当日量>近20日均量×1.5），T-2日单日对比无法实现，已在notes说明。
+
+
+  【卖出条件映射说明】
+
+  - 止盈15% → PRICE_PCT.> n=1 value=15.0（当日涨幅≥15%触发，近似持仓期间盈利≥15%）。
+
+  - 止损-7% → PRICE_PCT.< n=1 value=-7.0（当日跌幅≤-7%触发）。
+
+  - 「持有最多3个交易日强制卖出」→ 条件构建器不支持持仓天数计数，建议在回测参数中设置「最大持仓天数=3」。
+
+  - 「T+1日开盘即涨停则跳过」→ 开盘涨停过滤（REL_PRICE.open_above_close_pct value<9.9）无法在现有指标中表达为排除条件，建议在执行层逻辑中处理。
+
+  - 「跌停时顺延卖出」→ 跌停顺延逻辑属于执行层控制，条件构建器不支持，需在回测引擎中实现。
+
+  - 信号排序（按放量倍数优先）和最大持仓N只，需在仓位管理模块配置，不在策略JSON中体现。'

@@ -1,0 +1,44 @@
+id: limitup_fanbao_final
+name: 涨停反包次日买入策略
+description: 昨日涨停封板，今日高开收阳且量能活跃，次日开盘买入；持仓最多3日，止盈15%或止损7%
+buy:
+  logic: AND
+  rules:
+  - indicator: LIMIT
+    op: yesterday_up
+    params: {}
+  - indicator: REL_PRICE
+    op: open_above_close_pct
+    params:
+      n: 1
+    value: 0.0
+  - indicator: REL_PRICE
+    op: close_above_close_pct
+    params:
+      n: 1
+    value: 0.0
+  - indicator: VOLUME
+    op: surge
+    params:
+      n: 5
+    value: 1.2
+sell:
+  logic: OR
+  rules:
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 1
+    value: 15.0
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 1
+    value: -7.0
+notes: 【买入条件说明】① `LIMIT.yesterday_up` 判定昨日涨停（而非今日涨停）；② `REL_PRICE.open_above_close_pct
+  n=1 value=0` 近似表达今开高于昨收（高开）；③ `REL_PRICE.close_above_close_pct n=1 value=0` 表示今收高于昨收（收盘为正收益，结合高开可近似推断收阳）；④
+  `VOLUME.surge n=5 value=1.2` 对应「今日成交量 > 过去5日均量×1.2」的量能活跃条件（原策略还有「>T-2日量×1.5」的OR逻辑，但现有指标不支持直接比较指定单日成交量，故仅保留5日均量倍数条件近似替代）。【卖出条件说明】止盈用
+  `PRICE_PCT.> value=15`，止损用 `PRICE_PCT.< value=-7`，逻辑为OR（任意一个触发即卖）；PRICE_PCT.n=1
+  表示当日涨跌幅。【无法精确表达的部分】① 「T+1日开盘买入」的次日买入时机：条件构建器在收盘后扫描，次日开盘执行，实际买入时点需在回测参数中设置「次日开盘买入」；②
+  「T日收阳（收盘>开盘）」无法直接用现有指标表达，已用「今收>昨收」近似替代；③ 「T-2日量×1.5」的单日历史量比较无可用指标，已用5日均量条件近似；④ 「最大持仓3日强制卖出」、「跌停时延迟卖出」、「仓位10%上限」、「最多持20只」等持仓管理规则需在回测参数（hold_days=3,
+  take_profit=0.15, stop_loss=0.07, position_limit=0.1, max_hold=20）中另行配置，条件构建器不支持时间计数类规则。

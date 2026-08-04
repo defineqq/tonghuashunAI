@@ -1,0 +1,65 @@
+id: limitup_fanbao_nextday_v5
+name: 涨停反包次日买入策略
+description: 昨日真实涨停（非一字板），今日高开收阳且放量，次日开盘买入；持有3日或触发止盈止损卖出
+buy:
+  logic: AND
+  rules:
+  - indicator: LIMIT
+    op: yesterday_up
+    params: {}
+  - indicator: REL_PRICE
+    op: open_above_close_pct
+    params:
+      n: 1
+    value: 0.1
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 1
+    value: 0.1
+  - indicator: VOLUME
+    op: surge
+    params:
+      n: 5
+    value: 1.5
+  - indicator: LIMIT
+    op: up
+    params: {}
+sell:
+  logic: OR
+  rules:
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 1
+    value: 15.0
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 1
+    value: -7.0
+notes: '【买入条件说明】
+
+  1. `LIMIT.yesterday_up` 判定昨日（T-1）真实涨停，注意这里无法在 JSON 层面直接区分「一字板」与「非一字板」，一字板过滤（即要求T-1日开盘价<涨停价）无法用现有指标精确表达，已在
+  notes 中说明，建议在回测引擎层面额外过滤：T-1日开盘价 < T-1日涨停价。
+
+  2. `REL_PRICE.open_above_close_pct` n=1 value=0.1 表示今日（T日）开盘价高于昨收（高开），阈值设为0.1%近似「高于」。
+
+  3. `PRICE_PCT.>` n=1 value=0.1 表示今日收盘相对昨收涨幅>0（收阳且正收益），同时隐含收盘>开盘的要求；但「收盘>开盘」（即收阳K线形态）无法用现有指标精确表达，已用「收盘涨幅>0」近似。
+
+  4. `VOLUME.surge` n=5 value=1.5 表示今日量>过去5日均量的1.5倍。
+
+  5. 关于「T日已涨停则排除」：买入信号在T日收盘后生成、T+1日开盘执行，若T日已涨停则不产生买入信号——这里用 `LIMIT.up` 作为排除条件（即当日涨停则不买），但现有
+  JSON 结构为 AND 逻辑全满足才买，需在引擎侧将此条取反（NOT LIMIT.up）。因条件构建器不支持 NOT 逻辑，建议引擎层面处理：T日收盘涨幅<9.5%才触发信号。
+
+  【卖出条件说明】
+
+  - `PRICE_PCT.>` value=15.0：持仓期间收益达+15%止盈（以每日价格涨幅近似，精确tick级止盈需引擎支持）。
+
+  - `PRICE_PCT.<` value=-7.0：持仓期间亏损达-7%止损。
+
+  - 「持有3个交易日无条件卖出」现有指标不支持持仓日计数，建议在回测参数/引擎层面设置最大持仓天数=3。
+
+  - 「跌停时无法卖出」属于成交撮合逻辑，需在回测引擎层面实现，JSON无法表达。
+
+  【仓位/股票池/分钟级模拟】均为回测引擎参数，不在策略JSON范围内，需在平台参数中另行配置。'

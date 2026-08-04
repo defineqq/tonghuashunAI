@@ -1,0 +1,62 @@
+id: limitup_fanbao_precise_v5
+name: 涨停反包次日买入精确版
+description: 前日涨停、当日高开收阳放量反包（但当日未涨停），次日开盘买入；止盈15%或止损7%，最长持有3日
+buy:
+  logic: AND
+  rules:
+  - indicator: LIMIT
+    op: yesterday_up
+    params: {}
+  - indicator: REL_PRICE
+    op: open_above_close_pct
+    params:
+      n: 1
+    value: 0.0
+  - indicator: REL_PRICE
+    op: close_above_close_pct
+    params:
+      n: 1
+    value: 0.0
+  - indicator: VOLUME
+    op: surge
+    params:
+      n: 5
+    value: 1.2
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 1
+    value: 9.5
+sell:
+  logic: OR
+  rules:
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 1
+    value: 15.0
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 1
+    value: -7.0
+notes: '【选股条件映射说明】
+
+  1. 「T-1日涨停」用 LIMIT.yesterday_up 判断，不用 LIMIT.up（后者是今日涨停，与「今日反包」逻辑冲突）。
+
+  2. 「今日高开」用 REL_PRICE.open_above_close_pct n=1 value=0.0，即今开高于昨收。
+
+  3. 「今日收阳（收盘>开盘）」现有指标无直接支持，已用 REL_PRICE.close_above_close_pct n=1 value=0.0（今收高于昨收）近似替代，含义略有差异：严格的「收>开」需要日内高低逻辑，条件构建器不支持，此为最接近近似。
+
+  4. 「今日量能活跃：量>5日均量×1.2」用 VOLUME.surge n=5 value=1.2 表达。
+
+  5. 「今日不涨停（涨幅<9.5%）」用 PRICE_PCT.< n=1 value=9.5 表达（正数阈值，过滤当日又涨停的情形）。注意 PRICE_PCT.<
+  的文档定义是负数跌幅，此处用正数阈值为近似，实际执行效果依平台实现而定，建议平台侧特殊处理。
+
+  【买入时机】T+1日开盘买入、且T+1日开盘涨幅≥9.5%则放弃，这属于「次日执行」与「实时开盘价过滤」逻辑，条件构建器仅能在信号日（T日）生成信号，次日是否涨停无法在信号生成阶段判断，建议在回测/实盘执行层额外加「若次日开盘涨停则跳过」的过滤逻辑。
+
+  【卖出条件】止盈15%与止损7%分别用 PRICE_PCT.> value=15 和 PRICE_PCT.< value=-7 表达，均以持仓买入日为基准（n=1近似当日涨跌幅，严格盈亏需回测引擎以买入价为基准计算，建议在回测参数中设置持仓止盈止损比例）。
+
+  「持有满3日强制平仓」和「跌停顺延卖出」属于持仓管理与时间计数逻辑，条件构建器不支持，必须在回测/交易执行引擎中单独实现。
+
+  「用最高价/最低价判断日内止盈止损触发」属于日内价格逻辑，条件构建器仅支持收盘价维度，建议在回测引擎开启「日内止盈止损」选项来配合实现。'

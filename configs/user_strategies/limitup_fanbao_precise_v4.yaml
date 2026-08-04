@@ -1,0 +1,71 @@
+id: limitup_fanbao_precise_v4
+name: 涨停反包次日开盘买入（精确版）
+description: T-2日真实涨停，T-1日高开阳线反包且量能活跃，T日开盘买入；止盈15%、止损7%或持满3日收盘卖出
+buy:
+  logic: AND
+  rules:
+  - indicator: LIMIT
+    op: prev_up
+    params: {}
+    value: 2
+  - indicator: REL_PRICE
+    op: open_above_close_pct
+    params:
+      n: 1
+    value: 0.1
+  - indicator: REL_PRICE
+    op: close_above_close_pct
+    params:
+      n: 2
+    value: 0.1
+  - indicator: VOLUME
+    op: surge
+    params:
+      n: 20
+    value: 1.2
+sell:
+  logic: OR
+  rules:
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 1
+    value: 15.0
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 1
+    value: -7.0
+  - indicator: LIMIT
+    op: down
+    params: {}
+notes: '【建模说明与近似处理】
+
+
+  1. **T-2日涨停**：用 `LIMIT.prev_up value=2` 表示「前2日内出现过涨停」，近似 T-2日涨停。条件构建器无法精确区分「恰好是T-2日涨停而非T-1日」，已为最接近表达。
+
+
+  2. **T-1日高开（开盘>前日收盘）**：用 `REL_PRICE.open_above_close_pct n=1 value=0.1` 表示今日开盘高于昨收0.1%以上（即正高开），近似「开盘价高于前日收盘」。
+
+
+  3. **T-1日阳线反包（收盘>开盘 且 涨幅>0相对T-2日）**：用 `REL_PRICE.close_above_close_pct n=2 value=0.1`
+  表示今收高于2日前收盘0.1%以上，间接包含了「阳线且相对T-2日正收益」的语义。「收盘>开盘」（当日阳线）无法用现有指标精确表达，此处用「相对T-2日收盘正收益」近似覆盖主要语义。
+
+
+  4. **T-1日量>T-2日量×1.2**：用 `VOLUME.surge n=20 value=1.2` 表示当日量大于近20日均量的1.2倍，近似「放量活跃」。原需求是「T-1日量>T-2日量×1.2」（两日间对比），现有指标无法做到逐日对比，已用均量倍数近似。
+
+
+  5. **T日开盘买入且排除开板即涨停**：条件构建器执行层面的「开盘价执行」与「开盘涨停跳过」属于交易执行逻辑，不在条件规则层表达，需在回测引擎的订单执行模块中配置「以开盘价下单，若开盘涨停则取消」。
+
+
+  6. **止盈15% / 止损7%**：用 `PRICE_PCT.> value=15` 和 `PRICE_PCT.< value=-7` 近似。PRICE_PCT
+  默认为收盘价涨跌幅，原需求为日内实时触发（tick/分钟级），条件构建器仅支持日线级别，日内精确触发需在回测引擎参数中另行设置。
+
+
+  7. **持满3个交易日卖出**：条件构建器不支持持仓时间计数，此条件无法在规则层表达，请在回测参数中设置「最大持仓天数=3日强制收盘卖出」。
+
+
+  8. **跌停无法卖出顺延**：加入 `LIMIT.down` 作为辅助规则（跌停日触发），实际顺延逻辑需由回测引擎处理，条件层无法自动顺延。
+
+
+  9. **股票池（中证500）、初始资金、等权分配、最大持仓数**：均属回测环境参数，需在回测配置界面单独设置，不在策略JSON中体现。'
