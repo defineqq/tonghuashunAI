@@ -70,17 +70,103 @@ def test_extract_json_rejects_when_no_object():
         agent_loop._extract_json("这里根本没 JSON。")
 
 
+def test_extract_json_repairs_unescaped_quotes_in_string_value():
+    """
+    真实案例：summary 里带了未转义的英文双引号
+    `"summary": "本轮围绕"昨日涨停"策略进行..."`
+    _extract_json 应自动修复并解析成功。
+    """
+    raw = (
+        '```json\n'
+        '{"action": "finish", "args": {"summary": "本轮围绕"昨日涨停→高开反包"策略'
+        '进行了多轮迭代", "best": {"strategy": "x"}}}\n'
+        '```'
+    )
+    r = agent_loop._extract_json(raw)
+    assert r["action"] == "finish"
+    assert "本轮围绕" in r["args"]["summary"]
+    assert "昨日涨停" in r["args"]["summary"]
+
+
+def test_extract_json_repairs_multiple_unescaped_quotes():
+    raw = '{"a": "他说"你好"", "b": "另一段"引号""}'
+    r = agent_loop._extract_json(raw)
+    assert r["a"] == '他说"你好"'
+    assert r["b"] == '另一段"引号"'
+
+
+def test_run_loop_retries_llm_on_bad_json(monkeypatch, isolate_tasks_dir):
+    """
+    LLM 第一次吐脏 JSON 时不应立刻 failed，应自动重试；
+    重试成功后任务继续完成，不算失败。
+    """
+    _stub_provider(monkeypatch)
+    calls = {"n": 0}
+
+    def flaky_ask(task, retry_hint=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            # 第一次抛脏 JSON 错
+            err = ValueError("LLM 返回不是合法 JSON：Expecting delimiter")
+            err.raw_reply = 'raw broken'
+            raise err
+        # 第二次返回合法 finish，任务成功结束
+        return {"action": "finish", "reason": "重试后 OK",
+                "args": {"summary": "OK"}}, "raw ok"
+
+    monkeypatch.setattr(agent_loop, "_ask_llm", flaky_ask)
+    monkeypatch.setattr(agent_loop.time, "sleep", lambda x: None)
+    task = agent_loop.AgentTask(
+        task_id="self_heal", goal="test", max_iterations=3,
+        started_at="now", provider="claude",
+    )
+    task.save()
+    agent_loop._run_loop(task)
+    # 未 failed，成功完成
+    assert task.status == "done"
+    assert calls["n"] == 2  # 一次失败 + 一次成功
+    # 最后一步不是 llm_error
+    assert task.steps[-1].action == "finish"
+
+
+def test_run_loop_gives_up_after_max_retries(monkeypatch, isolate_tasks_dir):
+    """LLM 连续 3 次都吐脏 JSON 才真正 failed。"""
+    _stub_provider(monkeypatch)
+    calls = {"n": 0}
+
+    def always_bad(task, retry_hint=None):
+        calls["n"] += 1
+        err = ValueError("bad json")
+        err.raw_reply = "broken"
+        raise err
+
+    monkeypatch.setattr(agent_loop, "_ask_llm", always_bad)
+    monkeypatch.setattr(agent_loop.time, "sleep", lambda x: None)
+    task = agent_loop.AgentTask(
+        task_id="give_up", goal="test", max_iterations=3,
+        started_at="now", provider="claude",
+    )
+    task.save()
+    agent_loop._run_loop(task)
+    assert task.status == "failed"
+    # 首次 + 2 次重试 = 3 次调用
+    assert calls["n"] == 3
+    assert task.steps[-1].action == "llm_error"
+
+
 def test_llm_error_persists_raw_reply(monkeypatch, isolate_tasks_dir):
     """LLM 返回脏数据时，step.raw_llm 应保留完整原文用于复盘（不只是 200 截断）。"""
     # 让 _ask_llm 抛带 raw_reply 属性的 ValueError
     long_raw = "```json\n{" + '"x":1,' * 200 + '"end":true' + "\n```\n后面还有一堆解释文字" * 50
 
-    def fake_ask(t):
+    def fake_ask(t, retry_hint=None):
         err = ValueError("LLM 返回不是合法 JSON：模拟")
         err.raw_reply = long_raw
         raise err
 
     monkeypatch.setattr(agent_loop, "_ask_llm", fake_ask)
+    # 让重试 sleep 更快，不然测试很慢
+    monkeypatch.setattr(agent_loop.time, "sleep", lambda x: None)
     task = agent_loop.AgentTask(
         task_id="rawpersist", goal="x", max_iterations=2,
         started_at="now", provider="claude",
@@ -90,7 +176,7 @@ def test_llm_error_persists_raw_reply(monkeypatch, isolate_tasks_dir):
     last = task.steps[-1]
     assert last.action == "llm_error"
     assert last.raw_llm is not None
-    # 应存了远超 200 字节的原文（旧实现只有 error 字段前 200 字节）
+    # 应存了远超 200 字节的原文（含 3 次尝试的 raw 累积）
     assert len(last.raw_llm) > 500
 
 
@@ -103,7 +189,7 @@ def test_finish_terminates_loop(monkeypatch):
             "summary": "找到了",
         }}
     ])
-    monkeypatch.setattr(agent_loop, "_ask_llm", lambda t: (next(decisions), "fake raw"))
+    monkeypatch.setattr(agent_loop, "_ask_llm", lambda t, retry_hint=None: (next(decisions), "fake raw"))
     task = agent_loop.AgentTask(
         task_id="test1", goal="示例", max_iterations=5,
         started_at="now", provider="claude",
@@ -120,7 +206,7 @@ def test_max_iterations_forced_stop(monkeypatch):
     _stub_provider(monkeypatch)
     # 反复 list_strategies
     monkeypatch.setattr(agent_loop, "_ask_llm",
-                        lambda t: ({"action": "list_strategies", "reason": "repeat", "args": {}}, "fake raw"))
+                        lambda t, retry_hint=None: ({"action": "list_strategies", "reason": "repeat", "args": {}}, "fake raw"))
     # 别真的去列策略
     monkeypatch.setitem(agent_loop.ACTIONS, "list_strategies",
                         lambda args: {"strategies": []})
@@ -141,7 +227,7 @@ def test_unknown_action_recorded_as_error(monkeypatch):
         {"action": "nonsense", "reason": "?", "args": {}},
         {"action": "finish", "reason": "算了", "args": {"summary": "放弃"}},
     ])
-    monkeypatch.setattr(agent_loop, "_ask_llm", lambda t: (next(decisions), "fake raw"))
+    monkeypatch.setattr(agent_loop, "_ask_llm", lambda t, retry_hint=None: (next(decisions), "fake raw"))
     task = agent_loop.AgentTask(
         task_id="test3", goal="示例", max_iterations=5,
         started_at="now", provider="claude",
@@ -154,15 +240,17 @@ def test_unknown_action_recorded_as_error(monkeypatch):
 
 def test_llm_bad_json_marks_failed(monkeypatch):
     _stub_provider(monkeypatch)
-    def bad_llm(t): raise ValueError("LLM 返回不是合法 JSON")
+    def bad_llm(t, retry_hint=None): raise ValueError("LLM 返回不是合法 JSON")
     monkeypatch.setattr(agent_loop, "_ask_llm", bad_llm)
+    monkeypatch.setattr(agent_loop.time, "sleep", lambda x: None)
     task = agent_loop.AgentTask(
         task_id="test4", goal="?", max_iterations=3,
         started_at="now", provider="claude",
     )
     _run_sync(task)
     assert task.status == "failed"
-    assert "LLM 决策失败" in task.error
+    # 3 次重试后仍失败才会有这条错误
+    assert "LLM 连续" in task.error or "3 次" in task.error
 
 
 def test_backtest_action_error_recorded(monkeypatch):
@@ -175,7 +263,7 @@ def test_backtest_action_error_recorded(monkeypatch):
         }},
         {"action": "finish", "reason": "结束", "args": {"summary": "回测失败了，只能作罢"}},
     ])
-    monkeypatch.setattr(agent_loop, "_ask_llm", lambda t: (next(decisions), "fake raw"))
+    monkeypatch.setattr(agent_loop, "_ask_llm", lambda t, retry_hint=None: (next(decisions), "fake raw"))
     def failing(args): raise RuntimeError("simulated failure")
     monkeypatch.setitem(agent_loop.ACTIONS, "backtest_score", failing)
     task = agent_loop.AgentTask(
@@ -191,7 +279,7 @@ def test_backtest_action_error_recorded(monkeypatch):
 def test_task_persistence_and_load(monkeypatch):
     _stub_provider(monkeypatch)
     monkeypatch.setattr(agent_loop, "_ask_llm",
-                        lambda t: ({"action": "finish", "reason": "ok",
+                        lambda t, retry_hint=None: ({"action": "finish", "reason": "ok",
                                     "args": {"summary": "s"}}, "fake raw"))
     task = agent_loop.AgentTask(
         task_id="persist1", goal="?", max_iterations=2,
@@ -224,7 +312,7 @@ def test_stub_provider_returns_deterministic(monkeypatch):
 def test_list_tasks_returns_recent(monkeypatch, isolate_tasks_dir):
     _stub_provider(monkeypatch)
     monkeypatch.setattr(agent_loop, "_ask_llm",
-                        lambda t: ({"action": "finish", "args": {"summary": "s"}, "reason": ""}, "fake raw"))
+                        lambda t, retry_hint=None: ({"action": "finish", "args": {"summary": "s"}, "reason": ""}, "fake raw"))
     for i in range(3):
         t = agent_loop.AgentTask(
             task_id=f"list{i}", goal=f"goal{i}", max_iterations=2,

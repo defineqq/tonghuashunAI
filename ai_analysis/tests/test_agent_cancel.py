@@ -49,7 +49,7 @@ def test_loop_respects_external_cancel(monkeypatch):
     monkeypatch.setattr(agent_loop, "current_provider", lambda: "claude")
 
     calls = {"n": 0}
-    def fake_ask(t):
+    def fake_ask(t, retry_hint=None):
         calls["n"] += 1
         # 第 1 轮之后 mark cancelled，第 2 轮不该被调用
         if calls["n"] == 2:

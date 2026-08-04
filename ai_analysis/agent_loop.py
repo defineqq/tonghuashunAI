@@ -406,7 +406,7 @@ def _extract_json(text: str) -> dict:
             return obj
         raise ValueError(f"JSON 顶层不是对象而是 {type(obj).__name__}")
     except json.JSONDecodeError as e:
-        # 兜底：括号平衡扫第一个完整对象（能处理少量非法尾巴）
+        # 兜底一：括号平衡扫第一个完整对象（能处理少量非法尾巴）
         depth, in_str, esc = 0, False, False
         for i, ch in enumerate(text[start:], start=start):
             if in_str:
@@ -428,7 +428,66 @@ def _extract_json(text: str) -> dict:
                         return json.loads(text[start:i + 1])
                     except json.JSONDecodeError:
                         break
+
+        # 兜底二：LLM 常把 summary 之类的值里嵌未转义的双引号，
+        # 比如 `"summary": "本轮围绕"昨日涨停"策略..."` → 手动扫描 + 转义
+        # 策略：找到每个 "key": " 后的开引号 → 匹配紧邻 , " 或 } " 或 ] "
+        # 中间的所有裸 " 全部转义
+        try:
+            fixed = _repair_unescaped_quotes(text[start:])
+            obj, _ = json.JSONDecoder().raw_decode(fixed)
+            if isinstance(obj, dict):
+                return obj
+        except Exception:
+            pass
+
         raise ValueError(f"无法从回复中解析 JSON：{e}")
+
+
+_STRING_START = re.compile(r'"\s*:\s*"')
+
+
+def _repair_unescaped_quotes(text: str) -> str:
+    """
+    修复 JSON 字符串值里未转义的双引号。
+    做法：从每个 `"key": "` 后开始扫，一直找到"引号 + 紧跟 , 或 } 或 ]"作为结束标记，
+    中间所有裸 " 都转义为 \\"。
+    对结构清晰、只是值里带引号的错误非常有效。
+    """
+    out = []
+    i = 0
+    n = len(text)
+    while i < n:
+        m = _STRING_START.search(text, i)
+        if not m:
+            out.append(text[i:])
+            break
+        # 输出到值开引号之后
+        out.append(text[i:m.end()])
+        i = m.end()
+        # 从此处开始找"合法结尾"引号
+        while i < n:
+            if text[i] == "\\" and i + 1 < n:
+                out.append(text[i:i + 2])
+                i += 2
+                continue
+            if text[i] == '"':
+                # 看下一个非空白字符
+                j = i + 1
+                while j < n and text[j] in " \t\r\n":
+                    j += 1
+                # 合法结尾：, } ] 或 EOF
+                if j >= n or text[j] in ",}]":
+                    out.append('"')
+                    i += 1
+                    break
+                # 否则是"值里裸引号"，转义掉
+                out.append('\\"')
+                i += 1
+                continue
+            out.append(text[i])
+            i += 1
+    return "".join(out)
 
 
 def _render_reference_summary(task_id: str) -> str | None:
@@ -519,8 +578,13 @@ def _render_history(steps: list[Step]) -> str:
     return "\n".join(lines)
 
 
-def _ask_llm(task: AgentTask) -> tuple[dict, str]:
-    """让 LLM 决定下一步动作。返回 (decision_dict, raw_llm_reply)。"""
+def _ask_llm(task: AgentTask, retry_hint: str | None = None) -> tuple[dict, str]:
+    """
+    让 LLM 决定下一步动作。返回 (decision_dict, raw_llm_reply)。
+
+    retry_hint: 上一轮的错误摘要（如"JSON 语法错误：Extra data..."）。
+    若非空，会作为额外系统提示塞进 prompt，让 LLM 自愈。
+    """
     if current_provider() == "stub":
         # 判断是否已跑过一次回测（忽略当前占位 thinking step）
         last_bt = next(
@@ -552,6 +616,18 @@ def _ask_llm(task: AgentTask) -> tuple[dict, str]:
         .replace("{{iter_count}}", str(len(task.steps)))
         .replace("{{history}}", _render_history(task.steps))
     )
+    # 重试自愈提示：告诉 LLM 上次犯了什么错
+    if retry_hint:
+        prompt += (
+            "\n\n---\n⚠️ **重要**：你上一次的回复被系统拒收，错误如下：\n\n"
+            f"```\n{retry_hint[:300]}\n```\n\n"
+            "常见原因：字符串值里出现了未转义的双引号（如 `\"summary\": \"...\"xxx\"...\"`）。\n"
+            "**修复策略**：\n"
+            "1. 中文字符串里想引用某段内容时，用中文引号「」或 『』，不要用英文 \" \n"
+            "2. 严格返回单个合法 JSON 对象，不要加任何 markdown 代码块\n"
+            "3. 如果长文本让你为难，把 summary 里的引号全部删掉或用中文符号替代\n"
+            "现在请重新给出上一步的决策 JSON："
+        )
     raw = chat(prompt, json_mode=True, max_tokens=1500)
     try:
         return _extract_json(raw), raw
@@ -593,18 +669,30 @@ def _run_loop(task: AgentTask):
             task.save()
             t0 = time.time()
 
-            try:
-                decision, raw_reply = _ask_llm(task)
-            except Exception as e:
-                # 占位 step 转为失败状态，保留可见性；把 raw_reply 一并存下来便于复盘
+            decision, raw_reply, last_err, retries = None, None, None, 0
+            MAX_LLM_RETRIES = 2  # 首次失败后再重试 2 次，共 3 次
+            for attempt in range(MAX_LLM_RETRIES + 1):
+                try:
+                    decision, raw_reply = _ask_llm(task, retry_hint=last_err)
+                    break
+                except Exception as e:
+                    last_err = f"{type(e).__name__}: {str(e)[:300]}"
+                    retries = attempt + 1
+                    # 每次重试都在 UI 上更新 step，让用户看到"正在自愈"
+                    step.reason = f"LLM 返回不合法，第 {retries} 次重试... ({last_err[:150]})"
+                    raw_from_exc = getattr(e, "raw_reply", None)
+                    if raw_from_exc:
+                        step.raw_llm = (step.raw_llm or "") + f"\n\n--- 第 {retries} 次失败 raw ---\n" + raw_from_exc[:2000]
+                    task.save()
+                    time.sleep(1)  # 稍等 1s 再打 LLM，避免瞬时抖动
+
+            if decision is None:
+                # 3 次都失败才真放弃
                 step.action = "llm_error"
                 step.phase = "failed"
-                step.error = f"{type(e).__name__}: {str(e)[:500]}"
-                raw_from_exc = getattr(e, "raw_reply", None)
-                if raw_from_exc:
-                    step.raw_llm = raw_from_exc[:4000]
+                step.error = f"LLM 连续 {MAX_LLM_RETRIES+1} 次返回不合法 JSON，放弃本轮。最后错误：{last_err}"
                 step.duration_ms = int((time.time() - t0) * 1000)
-                task.error = f"LLM 决策失败: {e}\n{traceback.format_exc()[-800:]}"
+                task.error = step.error
                 task.status = "failed"
                 task.save()
                 break
