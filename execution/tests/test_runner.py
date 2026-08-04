@@ -77,6 +77,39 @@ def test_state_load_missing_returns_none(isolate_state_dir):
     assert rn.RunnerState.load("never_created") is None
 
 
+def test_resolve_symbols_uses_watch_symbols_when_set(monkeypatch):
+    runner = rn.LiveRunner(account="pool_explicit", watch_symbols=["600519", "000858"])
+    got = runner._resolve_symbols(prices={"600519": 100.0})
+    assert got == ["600519", "000858"]
+
+
+def test_resolve_symbols_falls_back_to_top_by_amount_when_empty(monkeypatch):
+    """watch_symbols 为空时，应从全 A 快照按成交额降序取前 200 只。"""
+    fake_df = pd.DataFrame([
+        {"代码": "600519", "最新价": 1500, "成交额": 5_000_000_000},
+        {"代码": "000001", "最新价": 12, "成交额": 3_000_000_000},
+        {"代码": "300750", "最新价": 200, "成交额": 4_000_000_000},
+        {"代码": "605050", "最新价": 30, "成交额": 100_000_000},
+    ])
+    from data_layer import market
+    monkeypatch.setattr(market, "snapshot", lambda: fake_df)
+
+    runner = rn.LiveRunner(account="pool_empty", watch_symbols=None)
+    got = runner._resolve_symbols(prices={})
+    # 按成交额降序：茅台 → 宁德 → 平安 → 小票
+    assert got[:3] == ["600519", "300750", "000001"]
+
+
+def test_resolve_symbols_snapshot_failure_returns_empty(monkeypatch):
+    from data_layer import market
+    def boom():
+        raise RuntimeError("no network")
+    monkeypatch.setattr(market, "snapshot", boom)
+    runner = rn.LiveRunner(account="pool_boom")
+    got = runner._resolve_symbols(prices={})
+    assert got == []
+
+
 def test_update_runner_hot_switches_strategy(monkeypatch):
     """update_runner 应在不停线程的前提下改内存里的策略/池子/tick。"""
     runner = rn.LiveRunner(account="hot_swap", strategy_id="old", tick_seconds=15)

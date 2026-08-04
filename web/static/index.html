@@ -336,8 +336,11 @@
             </select>
           </div>
           <div class="md:col-span-2">
-            <div class="label">股票池（逗号分隔，仅策略模式用）</div>
-            <input id="live-symbols" type="text" placeholder="600519,000858,300750" class="field">
+            <div class="label">
+              股票池（逗号分隔）
+              <span class="text-[11px] text-slate-400 font-normal">留空 = 全 A 成交额 Top 200 活跃股</span>
+            </div>
+            <input id="live-symbols" type="text" placeholder="留空即用全 A Top200；或填如 600519,000858,300750" class="field">
           </div>
         </div>
         <div class="flex gap-2 items-center flex-wrap mt-3">

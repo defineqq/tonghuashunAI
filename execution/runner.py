@@ -194,9 +194,34 @@ class LiveRunner:
         self.state.ticks_count += 1
         self.state.save()
 
+    def _resolve_symbols(self, prices: dict[str, float]) -> list[str]:
+        """
+        决定本轮要跑策略的股票池：
+        - watch_symbols 非空 → 直接用它（用户指定的池）
+        - watch_symbols 为空 → 全 A 活跃股 top 200（按成交额降序，避免全池 5000+ 只太慢）
+        """
+        if self.watch_symbols:
+            return self.watch_symbols
+        # 从快照拿全 A，按成交额降序取前 200
+        try:
+            from data_layer import market
+            df = market.snapshot()
+            code_col = next((c for c in df.columns if c in ("代码", "symbol")), None)
+            amt_col = next((c for c in df.columns if c in ("成交额", "amount")), None)
+            if code_col and amt_col:
+                df = df.copy()
+                df[code_col] = df[code_col].astype(str).str.zfill(6)
+                df = df.sort_values(amt_col, ascending=False)
+                return df[code_col].head(200).tolist()
+            elif code_col:
+                return df[code_col].astype(str).str.zfill(6).head(200).tolist()
+        except Exception:
+            pass
+        return []
+
     def _run_strategy_once(self, prices: dict[str, float]) -> None:
         """
-        对 watch_symbols 里每只股票跑一次策略；仅当没有活跃委托 & 未持仓时才下新单。
+        对候选股票池里每只跑一次策略；仅当没有活跃委托 & 未持仓时才下新单。
         委托类型：限价单，用当前快照价 ±0.5% 作为价格保护。
         """
         from strategies.registry import registry, bootstrap
@@ -206,8 +231,9 @@ class LiveRunner:
             return
 
         active_syms = {o.symbol for o in self.broker.query_orders(active_only=True)}
+        symbols = self._resolve_symbols(prices)
 
-        for sym in self.watch_symbols:
+        for sym in symbols:
             if sym in active_syms:
                 continue
             price = prices.get(sym)
