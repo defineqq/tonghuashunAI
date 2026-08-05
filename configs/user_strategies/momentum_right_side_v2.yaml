@@ -1,0 +1,66 @@
+id: momentum_right_side_v2
+name: 动量右侧趋势跟踪
+description: 均线多头+MACD金叉+放量确认买入，死叉或跌破均线卖出，规避涨跌停板
+buy:
+  logic: AND
+  rules:
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 1
+    value: 9.5
+  - indicator: MA
+    op: price_above
+    params:
+      fast: 5
+      slow: 20
+  - indicator: SLOPE_MA
+    op: up>
+    params:
+      n: 20
+      lookback: 5
+    value: 0.1
+  - indicator: MACD
+    op: golden_cross
+    params:
+      fast: 12
+      slow: 26
+      signal: 9
+  - indicator: VOLUME
+    op: surge
+    params:
+      n: 5
+    value: 1.5
+  - indicator: RSI
+    op: cross_up
+    params:
+      n: 14
+    value: 40
+sell:
+  logic: OR
+  rules:
+  - indicator: MA
+    op: price_below
+    params:
+      fast: 5
+      slow: 20
+  - indicator: MACD
+    op: death_cross
+    params:
+      fast: 12
+      slow: 26
+      signal: 9
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 20
+    value: -5.0
+notes: 【买入条件说明】①「当日非涨停」用 PRICE_PCT.<(n=1, value=9.5) 近似，因现有指标无「非涨停」的直接排除 op，此处用单日涨幅
+  < 9.5% 代替；②「股价在 MA20 之上」→ MA.price_above；③「MA20 斜率向上」→ SLOPE_MA.up>(n=20, lookback=5,
+  value=0.1)，表示近 5 日 MA20 累计涨幅 > 0.1%，阈值低以避免误滤；④ MACD 金叉 → MACD.golden_cross；⑤「量 >
+  5 日均量 1.5 倍」→ VOLUME.surge(n=5, value=1.5)；⑥「RSI 在 40~70 之间」现有 RSI 指标无区间 op，用 RSI.cross_up(value=40)
+  近似表示 RSI 刚上穿 40 进入健康区，RSI 超买上限（>70）的过滤无法直接叠加 AND，建议在回测参数中另设 RSI<70 的筛选条件，此处以 cross_up
+  40 近似表达进入强势区的信号。【卖出条件说明】①「非跌停且跌破 MA20」→ MA.price_below（跌停时也会跌破均线，极端情形下接受此误差）；②「MACD
+  死叉」→ MACD.death_cross；③「持股超 20 日亏损超 5%」→ 条件构建器不支持持仓时间计数，用 PRICE_PCT.<(n=20, value=-5.0)
+  近似，即 20 日内累计跌幅超 5% 触发止损，请在回测参数中另设持仓天数上限。【仓位】最大持仓只数(limit)由回测参数设置，等权重分配需在系统仓位管理模块中配置，策略
+  JSON 层不支持该字段。

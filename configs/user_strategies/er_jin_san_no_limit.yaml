@@ -1,0 +1,89 @@
+id: er_jin_san_no_limit
+name: 二进三突破策略（涨停日不买，跌停日不卖）
+description: 过去10日内至少2次涨停、当日非涨停、站上5日均线、放量1.5倍、MACD柱正、涨幅0-7%时买入；非跌停日且跌破10日均线或止盈25%或止损7%时卖出
+buy:
+  logic: AND
+  rules:
+  - indicator: LIMIT
+    op: prev_up
+    params: {}
+    value: 10
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 1
+    value: 9.5
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 1
+    value: 0.0
+  - indicator: MA
+    op: price_above
+    params:
+      fast: 5
+      slow: 5
+  - indicator: VOLUME
+    op: surge
+    params:
+      n: 20
+    value: 1.5
+  - indicator: MACD_HIST
+    op: hist>0
+    params:
+      fast: 12
+      slow: 26
+      signal: 9
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 1
+    value: 7.0
+sell:
+  logic: OR
+  rules:
+  - indicator: MA
+    op: price_below
+    params:
+      fast: 10
+      slow: 10
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 20
+    value: 25.0
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 20
+    value: -7.0
+notes: '【买入条件说明】
+
+  1. `LIMIT.prev_up value=10`：前10日内出现过涨停，但此指标只能判断「是否出现过」而非「至少2次」，无法精确统计次数，已用「前10日内出现过涨停」近似，实际二进三的「至少2次」条件无法用现有指标精确表达；
+
+  2. `PRICE_PCT.< value=9.5`：当日涨幅小于9.5%，排除涨停日买入（非涨停日）；
+
+  3. `PRICE_PCT.> value=0.0`：当日涨幅大于0%，配合条件2构成0%-7%区间下限；
+
+  4. `MA.price_above fast=5 slow=5`：股价站上5日均线（fast/slow同为5，表示与MA5比较）；
+
+  5. `VOLUME.surge value=1.5`：当日量大于20日均量1.5倍；
+
+  6. `MACD_HIST.hist>0`：MACD柱状线为正；
+
+  7. `PRICE_PCT.< value=7.0`：当日涨幅小于7%，配合条件3构成涨幅上限。
+
+
+  【卖出条件说明】
+
+  1. 「跌停日不卖」：条件构建器无法对卖出规则加「前提条件」（即跌停时屏蔽卖出），无法精确表达，建议在实盘/回测系统层面设置「跌停不卖」过滤；
+
+  2. `MA.price_below fast=10 slow=10`：收盘跌破10日均线（fast/slow同为10）；
+
+  3. `PRICE_PCT.> n=20 value=25.0`：持仓20日内累计涨幅超25%止盈（以20日涨幅近似，非精确持仓盈亏，建议在回测参数里用浮动盈亏止盈）；
+
+  4. `PRICE_PCT.< n=20 value=-7.0`：持仓20日内累计跌幅超7%止损；
+
+  5. 「持仓超过20个交易日卖出」无法用现有指标表达，建议在回测/实盘系统的持仓时间参数中另行设置；
+
+  6. 资金管理（单票10%仓位、最多10只）属于仓位控制层，不在策略条件JSON范畴，请在资金管理模块单独配置。'

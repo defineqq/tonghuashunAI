@@ -1,0 +1,67 @@
+id: right_side_trend_no_limit
+name: 右侧趋势跟踪（涨停不买/跌停不卖）
+description: MA5金叉MA20+均线向上+放量时买入，排除涨停日追高；死叉或跌破均线时卖出，排除跌停日强制卖出
+buy:
+  logic: AND
+  rules:
+  - indicator: MA
+    op: price_above
+    params:
+      fast: 5
+      slow: 20
+  - indicator: SLOPE_MA
+    op: rising
+    params:
+      n: 20
+      lookback: 5
+  - indicator: MA
+    op: cross_up
+    params:
+      fast: 5
+      slow: 20
+  - indicator: VOLUME
+    op: surge
+    params:
+      n: 5
+    value: 1.5
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 1
+    value: 9.5
+  - indicator: RSI
+    op: cross_up
+    params:
+      n: 14
+    value: 40
+  - indicator: RSI
+    op: <
+    params:
+      n: 14
+    value: 70
+sell:
+  logic: OR
+  rules:
+  - indicator: MA
+    op: cross_down
+    params:
+      fast: 5
+      slow: 20
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 1
+    value: -2.0
+  - indicator: ATR
+    op: stop_hit
+    params:
+      n: 14
+    value: 1.5
+notes: 【买入】①`MA.price_above`(slow=20) 确认股价站上20日线；②`SLOPE_MA.rising`(n=20,lookback=5)
+  确认20日均线持续向上；③`MA.cross_up`(5/20) 触发金叉信号；④`VOLUME.surge`(n=5,value=1.5) 以5日均量为基准判断放量1.5倍；⑤`PRICE_PCT.<`(value=9.5)
+  排除涨停日（今日涨幅<9.5%），注意此处用正数9.5表示「涨幅不超过9.5%」，需平台支持正值上界判断，若平台PRICE_PCT.< 只支持负值，请在前端额外增加「非涨停」过滤；⑥⑦
+  RSI在40~70之间用 cross_up(40)+<(70) 组合近似，严格意义上cross_up(40)表示RSI上穿40而非持续>40，实际应为RSI>40
+  AND RSI<70，但现有指标RSI.>无法直接用40作value同时排除超买，已用最接近组合替代，建议结合回测调整。【卖出】①`MA.cross_down`(5/20)
+  死叉卖出；②`PRICE_PCT.<`(value=-2.0) 近似「跌破MA20且低于2%」（用当日跌幅-2%替代，无法精确表达「收盘价低于MA20的2%」，已近似处理）；③`ATR.stop_hit`(n=14,value=1.5)
+  近似8%止损（ATR追踪止损）。【无法实现的条件】：a)「跌停日不卖」——现有指标无法在卖出逻辑中添加「当日非跌停」的排除条件，建议在平台风控层单独设置；b)
+  「持仓亏损超过8%」精确百分比止损——用ATR.stop_hit近似，精确固定比例止损建议在回测/实盘参数里单独配置；c) 「持仓盈利超过30%止盈」——条件构建器不支持持仓成本计算，建议在平台止盈参数里另行设置。

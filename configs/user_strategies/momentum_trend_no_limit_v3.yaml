@@ -1,0 +1,71 @@
+id: momentum_trend_no_limit_v3
+name: 动量趋势跟踪（严格限制涨跌停）
+description: MA5上穿MA20金叉、均线向上、放量、RSI适中、价格在MA60上方时买入；死叉、跌破MA60、止盈20%或止损7%时卖出，涨停日不买、跌停日不卖
+buy:
+  logic: AND
+  rules:
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 1
+    value: 9.5
+  - indicator: MA
+    op: cross_up
+    params:
+      fast: 5
+      slow: 20
+  - indicator: SLOPE_MA
+    op: up>
+    params:
+      n: 20
+      lookback: 5
+    value: 0.1
+  - indicator: VOLUME
+    op: surge
+    params:
+      n: 20
+    value: 1.2
+  - indicator: RSI
+    op: cross_up
+    params:
+      n: 14
+    value: 40
+  - indicator: RSI
+    op: <
+    params:
+      n: 14
+    value: 70
+  - indicator: MA
+    op: price_above
+    params:
+      fast: 5
+      slow: 60
+sell:
+  logic: OR
+  rules:
+  - indicator: MA
+    op: cross_down
+    params:
+      fast: 5
+      slow: 20
+  - indicator: MA
+    op: price_below
+    params:
+      fast: 5
+      slow: 60
+  - indicator: PRICE_PCT
+    op: '>'
+    params:
+      n: 20
+    value: 20.0
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 20
+    value: -7.0
+notes: 1. 买入条件1「非涨停日」：PRICE_PCT(n=1).<(value=9.5) 用于过滤涨停（涨幅<9.5%才允许买），这是正向表达「今日涨幅不足涨停线」；2.
+  买入条件3「20日均线方向向上」：用 SLOPE_MA(n=20, lookback=5).up> value=0.1 近似表达「近5日MA20累计上涨超0.1%」，即均线斜率向上；3.
+  买入条件5「RSI在40~70之间」：用 RSI.cross_up(value=40) + RSI.<(value=70) 组合表达，cross_up 40 意味着RSI刚从下方穿越40（即当前≥40），同时小于70；注意此处
+  cross_up 是穿越条件而非持续条件，若需「RSI持续在40以上」可在 notes 中提示回测时关注；4. 卖出条件中「跌停日不卖」的逻辑：现有指标无法在规则层面为每条卖出规则附加「非跌停」的前提过滤，建议在回测引擎/执行层面增加跌停日挂单不成交的约束，此处
+  JSON 侧重信号触发逻辑；5. 止盈止损（PRICE_PCT n=20）：用持仓20日内涨幅>20%作为止盈信号，20日内跌幅<-7%作为止损信号，这是对「持仓收益」的近似，精确持仓盈亏需回测引擎支持；6.
+  卖出条件默认 OR，任一触发即卖，符合用户描述。

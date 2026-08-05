@@ -242,7 +242,7 @@ class PaperBroker(Broker):
                 return
             # 落 Trade + 持仓
             self.portfolio.apply_buy(o.symbol, remaining, price, fee,
-                                      date=datetime.now().strftime("%Y-%m-%d"),
+                                      date=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                                       reason=o.reason or "live_paper")
         else:
             pos = self.portfolio.positions.get(o.symbol)
@@ -253,7 +253,7 @@ class PaperBroker(Broker):
                 return
             fee = _sell_fees(amount, is_sh, self.fee_cfg)
             self.portfolio.apply_sell(o.symbol, remaining, price, fee,
-                                       date=datetime.now().strftime("%Y-%m-%d"),
+                                       date=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                                        reason=o.reason or "live_paper")
 
         # 更新委托状态

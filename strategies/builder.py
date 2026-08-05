@@ -285,6 +285,15 @@ INDICATORS: dict[str, dict[str, Any]] = {
              "value_type": "number", "value_default": -3.0},
             {"name": "close_above_close_pct", "label": "今日收盘 / 前 N 日收盘 - 1 大于 %",
              "value_type": "number", "value_default": 3.0},
+            # ---- 单日 K 线形态：真正的"收阳/收阴" ----
+            {"name": "close_gt_open", "label": "今日收阳（收盘 > 开盘）",
+             "value_type": "none"},
+            {"name": "close_lt_open", "label": "今日收阴（收盘 < 开盘）",
+             "value_type": "none"},
+            {"name": "body_up_pct_gt", "label": "今日实体阳线涨幅（收/开 - 1）大于 %",
+             "value_type": "number", "value_default": 2.0},
+            {"name": "body_dn_pct_gt", "label": "今日实体阴线跌幅（1 - 收/开）大于 %",
+             "value_type": "number", "value_default": 2.0},
         ],
     },
     # ---- ATR：波动率 & 止损用 ----
@@ -620,6 +629,18 @@ def _eval_rule(bars: pd.DataFrame, rule: dict) -> pd.Series:
             return is_up.astype(int).rolling(n).min().fillna(0).astype(bool)
 
     elif ind == "REL_PRICE":
+        # 单日 K 线形态：与 n 无关
+        if op == "close_gt_open":
+            return close > open_
+        if op == "close_lt_open":
+            return close < open_
+        if op == "body_up_pct_gt":
+            body_pct = (close / open_.replace(0, pd.NA) - 1) * 100
+            return body_pct > float(value)
+        if op == "body_dn_pct_gt":
+            body_pct = (1 - close / open_.replace(0, pd.NA)) * 100
+            return body_pct > float(value)
+        # 需要前 N 日收盘价对比
         n = int(ps.get("n", 1))
         prev_close = close.shift(n)
         pct = (open_ if op.startswith("open_") else close) / prev_close - 1

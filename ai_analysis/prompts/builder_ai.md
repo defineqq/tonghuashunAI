@@ -50,6 +50,15 @@
    - "今日开盘低于昨日收盘 3%" → `REL_PRICE.open_below_close_pct` n=1 value=-3.0
    - 打板策略最典型的错误：把「昨日涨停」写成 `LIMIT.up`，就会导致零成交
 
+8. **K 线形态 · 收阳 / 收阴 / 反包**（**重要 · 常踩坑**）：
+   - "今日收阳" = **收盘价 > 开盘价** → `REL_PRICE.close_gt_open`（**不是** close>昨收！）
+   - "今日收阴" = 收盘价 < 开盘价 → `REL_PRICE.close_lt_open`
+   - "今日实体大阳线（涨 3% 以上）" → `REL_PRICE.body_up_pct_gt` value=3.0
+   - "反包" = 今日收阳 且 今收 > 昨收 → **两条规则 AND**：
+     `REL_PRICE.close_gt_open` + `REL_PRICE.close_above_close_pct` n=1 value=0.0
+   - **千万别**把"反包"只写成 `close_above_close_pct`（收 > 昨收）！那个条件"高开低走但收在昨收之上"也满足，明显不是反包
+   - "高开低走" = `REL_PRICE.open_above_close_pct` n=1 value=0.0 且 `REL_PRICE.close_lt_open`
+
 ## 例子
 
 用户：「5 日线金叉 20 日线且放量 2 倍以上就买，跌破 20 日线就卖」

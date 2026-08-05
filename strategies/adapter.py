@@ -22,7 +22,12 @@ from paper_trade.risk import SellSignal
 
 
 def make_strategy_fn(strategy_id: str, params: dict | None = None,
-                     position_size: float = 0.18, min_cash_pct: float = 0.10):
+                     position_size: float = 0.18, min_cash_pct: float = 0.10,
+                     signal_lag_days: int = 1):
+    """
+    signal_lag_days: 信号延迟 N 日成交。默认 1 = "T-1 日收盘后产生信号 → T 日成交"，
+    避免未来函数污染。设为 0 = 老行为（当日信号当日成交，会有未来函数）。
+    """
     """
     把一个技术策略包装成 backtest.engine.run 需要的 strategy_fn。
 
@@ -77,10 +82,22 @@ def make_strategy_fn(strategy_id: str, params: dict | None = None,
         except Exception:
             signal_cache[symbol] = (end_str, {})
             return {}
+        # 信号左移 signal_lag_days 个交易日：T 日收盘产生的信号，映射到 T+lag 日成交
+        # 用 df["date"] 作为交易日序列（自动跳过节假日/周末）
+        dates = df["date"].reset_index(drop=True)
+        date_index = {d: i for i, d in enumerate(dates)}
         m = {}
         for bs in bar_signals:
-            if bs.action != SignalAction.HOLD:
-                m[bs.date.strftime("%Y-%m-%d")] = bs.action.value + "|" + bs.reason
+            if bs.action == SignalAction.HOLD:
+                continue
+            idx = date_index.get(bs.date)
+            if idx is None:
+                continue
+            target_idx = idx + signal_lag_days
+            if target_idx >= len(dates):
+                continue  # 信号在最后几天，还没到成交日
+            exec_date = dates.iloc[target_idx]
+            m[exec_date.strftime("%Y-%m-%d")] = bs.action.value + "|" + bs.reason
         signal_cache[symbol] = (end_str, m)
         return m
 
