@@ -141,5 +141,79 @@ def test_portfolio_serialization(tmp_path):
     assert len(p2.daily_snapshots) == 1
 
 
+def test_execute_day_skips_buy_on_limit_up():
+    """涨停日买单必须被跳过。"""
+    p = Portfolio.new("test", 1_000_000)
+    fee_cfg = FeeConfig()
+    execute_day(
+        p, "2024-01-02",
+        close_prices={"600519": 110.0},
+        buy_signals=[BuySignal(symbol="600519", target_pct=0.2, reason="try")],
+        price_info={"600519": {"close": 110.0, "pct_change": 9.85}},  # 涨停
+        fee_cfg=fee_cfg,
+    )
+    assert "600519" not in p.positions, "涨停日不应买入"
+    # 快照仍会记录（只是没成交）
+    assert len(p.daily_snapshots) == 1
+
+
+def test_execute_day_buy_allowed_below_limit_up():
+    """非涨停日买单正常成交。"""
+    p = Portfolio.new("test", 1_000_000)
+    fee_cfg = FeeConfig()
+    execute_day(
+        p, "2024-01-02",
+        close_prices={"600519": 110.0},
+        buy_signals=[BuySignal(symbol="600519", target_pct=0.2, reason="try")],
+        price_info={"600519": {"close": 110.0, "pct_change": 9.0}},  # 未到涨停
+        fee_cfg=fee_cfg,
+    )
+    assert "600519" in p.positions
+
+
+def test_execute_day_skips_sell_on_limit_down():
+    """跌停日卖单必须被跳过（保持持仓，下一日再试）。"""
+    p = Portfolio.new("test", 1_000_000)
+    fee_cfg = FeeConfig()
+    # 先建仓
+    buy(p, "600519", target_amount=100_000, close_price=100.0,
+        date="2024-01-01", reason="init", fee_cfg=fee_cfg)
+    initial_shares = p.positions["600519"].shares
+    # 跌停日卖出信号
+    execute_day(
+        p, "2024-01-02",
+        close_prices={"600519": 90.0},
+        sell_signals=[SellSignal(symbol="600519", ratio=1.0, reason="stop_loss")],
+        price_info={"600519": {"close": 90.0, "pct_change": -9.9}},  # 跌停
+        fee_cfg=fee_cfg,
+    )
+    assert "600519" in p.positions, "跌停日不应卖出"
+    assert p.positions["600519"].shares == initial_shares
+
+
+def test_execute_day_kcb_limit_20pct():
+    """科创板涨停阈值 20%（688 开头），9.85% 不算涨停应放行。"""
+    p = Portfolio.new("test", 1_000_000)
+    execute_day(
+        p, "2024-01-02",
+        close_prices={"688981": 55.0},
+        buy_signals=[BuySignal(symbol="688981", target_pct=0.2, reason="try")],
+        price_info={"688981": {"close": 55.0, "pct_change": 9.85}},  # 主板算涨停但科创板不算
+        fee_cfg=FeeConfig(),
+    )
+    assert "688981" in p.positions
+
+    # 科创板 20% 才算涨停
+    p2 = Portfolio.new("test", 1_000_000)
+    execute_day(
+        p2, "2024-01-02",
+        close_prices={"688981": 65.0},
+        buy_signals=[BuySignal(symbol="688981", target_pct=0.2, reason="try")],
+        price_info={"688981": {"close": 65.0, "pct_change": 19.9}},
+        fee_cfg=FeeConfig(),
+    )
+    assert "688981" not in p2.positions, "科创板 19.9% 视为涨停应跳过"
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))

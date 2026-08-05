@@ -73,6 +73,28 @@ def _load_close_prices(symbols: Iterable[str], date: str) -> dict[str, float]:
     return result
 
 
+def _load_price_info(symbols: Iterable[str], date: str) -> dict[str, dict]:
+    """
+    加载指定日期各股票的收盘价 + 涨跌幅。broker 用它判涨跌停能否成交。
+    返回 {sym: {"close": float, "pct_change": float}}
+    """
+    result = {}
+    for s in symbols:
+        try:
+            df = market.daily(s, start="2018-01-01", end=date)
+            match = df[df["date"] <= pd.Timestamp(date)]
+            if match.empty:
+                continue
+            last = match.iloc[-1]
+            result[s] = {
+                "close": float(last["close"]),
+                "pct_change": float(last["pct_change"]) if "pct_change" in last else 0.0,
+            }
+        except Exception:
+            pass
+    return result
+
+
 def run(
     strategy_fn: Callable,
     universe: list[str],
@@ -120,15 +142,17 @@ def run(
     for i, date in enumerate(trading_days, 1):
         buys, sells = strategy_fn(port, universe, as_of=date, **strategy_kwargs)
 
-        # 加载当日所有相关股票的收盘价
+        # 加载当日所有相关股票的收盘价 + 涨跌幅（判涨跌停用）
         relevant = set(list(port.positions.keys()) + [b.symbol for b in buys])
-        close_prices = _load_close_prices(relevant, date)
+        price_info = _load_price_info(relevant, date)
+        close_prices = {s: v["close"] for s, v in price_info.items()}
 
         execute_day(
             port, date, close_prices,
             buy_signals=buys, sell_signals=sells,
             risk_cfg=risk_cfg, fee_cfg=fee_cfg,
             max_positions=max_positions,
+            price_info=price_info,
         )
 
         if i % progress_every == 0 or i == len(trading_days):

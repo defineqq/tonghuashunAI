@@ -186,6 +186,23 @@ def mark_to_market(portfolio: Portfolio, close_prices: dict[str, float]) -> None
             pos.last_price = close_prices[sym]
 
 
+LIMIT_UP_THRESHOLD = 9.7    # 涨幅 >= 9.7% 视为涨停（含 T+1/科创/创业 20% 略保守）
+LIMIT_DOWN_THRESHOLD = -9.7  # 跌幅 <= -9.7% 视为跌停
+
+
+def _is_limit_up(pct_change: float, symbol: str) -> bool:
+    # 科创板/创业板涨跌停 20%，用更严格 19.5 判断
+    if symbol.startswith(("300", "688")):
+        return pct_change >= 19.5
+    return pct_change >= LIMIT_UP_THRESHOLD
+
+
+def _is_limit_down(pct_change: float, symbol: str) -> bool:
+    if symbol.startswith(("300", "688")):
+        return pct_change <= -19.5
+    return pct_change <= LIMIT_DOWN_THRESHOLD
+
+
 def execute_day(
     portfolio: Portfolio,
     date: str,
@@ -195,6 +212,7 @@ def execute_day(
     risk_cfg: RiskConfig | None = None,
     fee_cfg: FeeConfig | None = None,
     max_positions: int = 5,
+    price_info: dict[str, dict] | None = None,
 ) -> dict:
     """
     执行一天的所有动作。
@@ -227,10 +245,16 @@ def execute_day(
         if s.symbol not in all_sells:
             all_sells[s.symbol] = s
 
+    price_info = price_info or {}
     trades = []
     for sig in all_sells.values():
         if sig.symbol in close_prices:
-            t = sell(portfolio, sig.symbol, sig.ratio, close_prices[sig.symbol], date, sig.reason, fee_cfg)
+            # 跌停日无法卖出 → 跳过（保持持仓，等下一日再试；风控信号会重复触发）
+            pi = price_info.get(sig.symbol)
+            if pi and _is_limit_down(pi.get("pct_change", 0.0), sig.symbol):
+                continue
+            t = sell(portfolio, sig.symbol, sig.ratio, close_prices[sig.symbol], date,
+                     sig.reason, fee_cfg)
             if t:
                 trades.append(t)
 
@@ -241,6 +265,10 @@ def execute_day(
         if sig.symbol not in close_prices:
             continue
         if sig.symbol in portfolio.positions:  # 已持仓不加仓（简化）
+            continue
+        # 涨停日无法买入 → 跳过
+        pi = price_info.get(sig.symbol)
+        if pi and _is_limit_up(pi.get("pct_change", 0.0), sig.symbol):
             continue
         target_amount = portfolio.total_value() * sig.target_pct
         target_amount = min(target_amount, portfolio.cash * 0.99)  # 留 1% 现金缓冲
