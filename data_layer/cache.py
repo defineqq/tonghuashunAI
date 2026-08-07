@@ -73,11 +73,33 @@ def cached(
             path = _cache_path(namespace, fn.__name__, fp)
 
             if _is_fresh(path, max_age_hours):
-                return pd.read_parquet(path)
+                try:
+                    return pd.read_parquet(path)
+                except Exception:
+                    # 缓存文件损坏（被截断/pyarrow 版本变化）：删掉重拉
+                    try:
+                        path.unlink()
+                    except Exception:
+                        pass
 
             df = fn(*args, **kwargs)
             path.parent.mkdir(parents=True, exist_ok=True)
-            df.to_parquet(path)
+            try:
+                df.to_parquet(path)
+            except Exception as e:
+                # 写盘失败（列类型 pyarrow 处理不了、磁盘满等）不能阻断返回。
+                # 尝试把 object 列强转 string 再写一次；仍失败就放弃缓存，直接返回。
+                try:
+                    df_safe = df.copy()
+                    for col in df_safe.columns:
+                        if df_safe[col].dtype == "object":
+                            df_safe[col] = df_safe[col].astype("string")
+                    df_safe.to_parquet(path)
+                except Exception:
+                    # 打个提示日志，但不影响本次返回
+                    import sys
+                    print(f"[cache] {fn.__name__} 写盘失败（跳过缓存）: "
+                          f"{type(e).__name__}: {str(e)[:120]}", file=sys.stderr)
             return df
 
         wrapper.__wrapped_uncached__ = fn  # type: ignore[attr-defined]
