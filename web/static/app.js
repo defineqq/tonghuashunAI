@@ -2172,17 +2172,40 @@ async function startLive() {
   const strategyId = document.getElementById('live-strategy').value || null;
   const symbols = document.getElementById('live-symbols').value
     .split(/[,，\s]+/).map(s => s.trim()).filter(Boolean);
+  const brokerKind = document.querySelector('input[name="live-broker-kind"]:checked')?.value || 'paper';
+
+  const body = {
+    account, tick_seconds: tick,
+    strategy_id: strategyId,
+    watch_symbols: symbols,
+    broker_kind: brokerKind,
+  };
+
+  if (brokerKind === 'qmt') {
+    const qa = document.getElementById('live-qmt-account').value.trim();
+    const qu = document.getElementById('live-qmt-userdata').value.trim();
+    if (!qa || !qu) {
+      document.getElementById('live-qmt-status').innerHTML =
+        '<span class="text-red-600">✗ 需要填写 QMT 资金账号和 userdata_mini 路径</span>';
+      return;
+    }
+    if (!confirm(`确定以【实盘模式】启动引擎？\n\n所有委托将真实发往券商，账户 ${qa}。\n\n请确认你已经：\n1. 跑过券商仿真至少 1 个月\n2. miniQMT 客户端已启动并登录\n3. 明白风险，愿意承担实盘亏损`)) return;
+    body.broker_config = { account_id: qa, user_data_path: qu };
+  }
+
   try {
-    await API('/live/start', {
-      method: 'POST',
-      body: JSON.stringify({
-        account, tick_seconds: tick,
-        strategy_id: strategyId,
-        watch_symbols: symbols,
-      }),
+    const r = await API('/live/start', {
+      method: 'POST', body: JSON.stringify(body),
     });
-    document.getElementById('live-status-msg').innerHTML =
-      '<span class="text-emerald-600">✓ 引擎已启动</span>';
+    let msg = '<span class="text-emerald-600">✓ 引擎已启动</span>';
+    if (r.broker_kind === 'qmt') {
+      if (r.qmt_ready) {
+        msg = '<span class="text-emerald-600">✓ 实盘引擎已启动，QMT 连接正常</span>';
+      } else {
+        msg = `<span class="text-amber-600">⚠️ 引擎已启动，但 QMT 未就绪：${r.qmt_message}</span>`;
+      }
+    }
+    document.getElementById('live-status-msg').innerHTML = msg;
     startLivePolling();
   } catch (e) {
     document.getElementById('live-status-msg').innerHTML =
@@ -2190,6 +2213,25 @@ async function startLive() {
   }
 }
 window.startLive = startLive;
+
+window.onBrokerKindChange = async function() {
+  const kind = document.querySelector('input[name="live-broker-kind"]:checked')?.value || 'paper';
+  const panel = document.getElementById('live-qmt-panel');
+  if (kind === 'qmt') {
+    panel.classList.remove('hidden');
+    // 拉一下 SDK 状态
+    try {
+      const r = await API('/live/qmt/status');
+      const parts = [];
+      parts.push(r.sdk_installed ? '✓ xtquant SDK 已安装' : `✗ xtquant 未安装：${(r.sdk_error||'').slice(0,80)}`);
+      parts.push(r.account_id_configured ? '✓ 账号已配置' : '· 账号未配置（可在此处输入）');
+      parts.push(r.user_data_path_configured ? '✓ 路径已配置' : '· 路径未配置（可在此处输入）');
+      document.getElementById('live-qmt-status').innerHTML = parts.join('　');
+    } catch {}
+  } else {
+    panel.classList.add('hidden');
+  }
+};
 
 async function stopLive() {
   const account = document.getElementById('acct-name').value.trim() || 'live_default';
@@ -2259,8 +2301,12 @@ async function refreshLive() {
       // 从策略下拉里反查中文名，展示"中文名 · 英文 id"，跟策略实验室一致
       const opt = document.querySelector(`#live-strategy option[value="${s.strategy_id || ''}"]`);
       const stratLabel = s.strategy_id ? (opt ? opt.textContent : s.strategy_id) : '手动模式';
-      badge.textContent = `⚡ 引擎运行中 · tick=${s.tick_seconds}s · ${stratLabel}`;
-      badge.className = 'ml-2 text-[11px] px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200';
+      const brokerBadge = (s.broker_kind === 'qmt') ? '💰 实盘' : '🧪 模拟';
+      badge.textContent = `⚡ 引擎运行中 · ${brokerBadge} · tick=${s.tick_seconds}s · ${stratLabel}`;
+      const bgCls = (s.broker_kind === 'qmt')
+        ? 'bg-red-50 text-red-700 border border-red-200'
+        : 'bg-emerald-50 text-emerald-700 border border-emerald-200';
+      badge.className = 'ml-2 text-[11px] px-2 py-0.5 rounded ' + bgCls;
       stopBtn.classList.remove('hidden');
       updateBtn.classList.remove('hidden');
       startBtn.textContent = '重新启动';

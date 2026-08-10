@@ -69,6 +69,7 @@ class RunnerState:
     watch_symbols: list[str] = field(default_factory=list)
     strategy_id: Optional[str] = None
     strategy_params: dict[str, Any] = field(default_factory=dict)
+    broker_kind: str = "paper"       # paper | qmt
 
     def save(self):
         (STATE_DIR / f"{self.account}.json").write_text(
@@ -88,22 +89,39 @@ class LiveRunner:
     def __init__(self, account: str, watch_symbols: list[str] | None = None,
                  strategy_id: Optional[str] = None,
                  strategy_params: dict | None = None,
-                 tick_seconds: int = 15):
+                 tick_seconds: int = 15,
+                 broker_kind: str = "paper",
+                 broker_config: dict | None = None):
+        """
+        broker_kind:
+          - "paper"  本地撮合（模拟盘，默认）
+          - "qmt"    国金/华泰/东财 miniQMT 实盘（需装 xtquant SDK + 配置账号）
+
+        broker_config: 仅 qmt 需要。示例：
+          {"account_id": "88888888", "user_data_path": "C:/QMT/userdata_mini"}
+        """
         self.account = account
         self.watch_symbols = list(watch_symbols or [])
         self.strategy_id = strategy_id
         self.strategy_params = strategy_params or {}
-        self.tick_seconds = max(5, int(tick_seconds))  # 最快 5 秒/tick，避免刷爆快照 API
+        self.tick_seconds = max(5, int(tick_seconds))
+        self.broker_kind = broker_kind
+        self.broker_config = broker_config or {}
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self.portfolio = pfolio.load_or_create(account)
-        self.broker = PaperBroker(self.portfolio, account=account)
+        if broker_kind == "qmt":
+            from execution.qmt_broker import QMTBroker
+            self.broker = QMTBroker(account=account, broker_config=self.broker_config)
+        else:
+            self.broker = PaperBroker(self.portfolio, account=account)
         self.state = RunnerState(
             account=account,
             watch_symbols=self.watch_symbols,
             strategy_id=strategy_id,
             strategy_params=self.strategy_params,
             tick_seconds=self.tick_seconds,
+            broker_kind=broker_kind,
         )
 
     # ---- 控制 --------------------------------------------------
@@ -170,11 +188,12 @@ class LiveRunner:
         df[code_col] = df[code_col].astype(str).str.zfill(6)
         prices = dict(zip(df[code_col], df[price_col].astype(float)))
 
-        # 3) 撮合活跃委托
-        changed = self.broker.on_tick(prices)
-        for o in changed:
-            if o.status.value == "filled":
-                self.state.orders_filled_count += 1
+        # 3) 撮合活跃委托（QMT 由券商柜台自己撮合，本地只需被动同步状态）
+        if hasattr(self.broker, "on_tick"):
+            changed = self.broker.on_tick(prices)
+            for o in changed:
+                if o.status.value == "filled":
+                    self.state.orders_filled_count += 1
 
         # 4) 更新 mark-to-market
         for sym, pos in self.portfolio.positions.items():
@@ -282,14 +301,17 @@ def get_runner(account: str) -> Optional[LiveRunner]:
 def start_runner(account: str, watch_symbols: list[str] | None = None,
                  strategy_id: Optional[str] = None,
                  strategy_params: dict | None = None,
-                 tick_seconds: int = 15) -> LiveRunner:
+                 tick_seconds: int = 15,
+                 broker_kind: str = "paper",
+                 broker_config: dict | None = None) -> LiveRunner:
     with _REG_LOCK:
         r = _RUNNERS.get(account)
         if r and r._thread and r._thread.is_alive():
             return r
         r = LiveRunner(account=account, watch_symbols=watch_symbols,
                        strategy_id=strategy_id, strategy_params=strategy_params,
-                       tick_seconds=tick_seconds)
+                       tick_seconds=tick_seconds,
+                       broker_kind=broker_kind, broker_config=broker_config)
         _RUNNERS[account] = r
         r.start()
         return r

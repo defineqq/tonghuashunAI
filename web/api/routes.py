@@ -1448,20 +1448,47 @@ class LiveStartRequest(BaseModel):
     strategy_id: Optional[str] = None
     strategy_params: Optional[dict] = None
     tick_seconds: int = 15
+    broker_kind: str = Field("paper", description="paper=本地模拟 / qmt=国金QMT等实盘")
+    broker_config: Optional[dict] = Field(None, description="qmt 模式需 {account_id, user_data_path}")
 
 
-@router.post("/live/start", summary="启动实时模拟盘 runner")
+@router.post("/live/start", summary="启动实时引擎 runner（支持 paper / qmt）")
 def live_start(req: LiveStartRequest):
     from execution.runner import start_runner
+    if req.broker_kind not in ("paper", "qmt"):
+        raise HTTPException(400, f"broker_kind 必须是 paper 或 qmt，收到 {req.broker_kind}")
     r = start_runner(
         account=req.account,
         watch_symbols=req.watch_symbols,
         strategy_id=req.strategy_id,
         strategy_params=req.strategy_params or {},
         tick_seconds=req.tick_seconds,
+        broker_kind=req.broker_kind,
+        broker_config=req.broker_config or {},
     )
-    return {"account": r.account, "status": r.state.status,
-            "started_at": r.state.started_at}
+    result = {"account": r.account, "status": r.state.status,
+              "started_at": r.state.started_at, "broker_kind": r.broker_kind}
+    # qmt 模式：立即上报连接状态
+    if r.broker_kind == "qmt" and hasattr(r.broker, "is_available"):
+        ok, msg = r.broker.is_available()
+        result["qmt_ready"] = ok
+        result["qmt_message"] = msg
+    return result
+
+
+@router.get("/live/qmt/status", summary="检查 QMT 环境（是否装了 xtquant / 配了账号）")
+def live_qmt_status():
+    """给前端一个"实盘按钮能不能亮"的判断依据。"""
+    from execution.qmt_broker import _try_import_xtquant, _load_config
+    sdk = _try_import_xtquant()
+    cfg = _load_config(None)
+    return {
+        "sdk_installed": "error" not in sdk,
+        "sdk_error": sdk.get("error"),
+        "account_id_configured": bool(cfg.get("account_id")),
+        "user_data_path_configured": bool(cfg.get("user_data_path")),
+        "config_source_hint": "环境变量 QMT_ACCOUNT_ID / QMT_USER_DATA_PATH 或 configs/qmt.yaml",
+    }
 
 
 class LiveUpdateRequest(BaseModel):

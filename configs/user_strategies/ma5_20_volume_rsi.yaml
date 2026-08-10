@@ -1,0 +1,43 @@
+id: ma5_20_volume_rsi
+name: 5/20金叉+放量+RSI过滤
+description: MA5上穿MA20金叉、成交量放大1.5倍、RSI在40-70之间同时满足时买入，死叉或跌5%止损卖出
+buy:
+  logic: AND
+  rules:
+  - indicator: MA
+    op: cross_up
+    params:
+      fast: 5
+      slow: 20
+  - indicator: VOLUME_RATIO
+    op: '>'
+    params:
+      n: 10
+    value: 1.5
+  - indicator: RSI
+    op: '>'
+    params:
+      n: 14
+    value: 40
+  - indicator: RSI
+    op: <
+    params:
+      n: 14
+    value: 70
+sell:
+  logic: OR
+  rules:
+  - indicator: MA
+    op: cross_down
+    params:
+      fast: 5
+      slow: 20
+  - indicator: PRICE_PCT
+    op: <
+    params:
+      n: 1
+    value: -5.0
+notes: 1. 金叉用 MA.cross_up(5,20) 精确匹配用户描述。2. 放量条件用 VOLUME_RATIO，参数 n=10 对应'过去10日平均'，阈值1.5倍与用户一致。3.
+  RSI(14)在40-70之间拆成两条规则 AND：RSI>40 且 RSI<70，避免超买超卖区域。4. 卖出：死叉（MA.cross_down）+ 跌幅超5%止损（PRICE_PCT.<
+  value=-5），两者 OR 任一触发即卖。5. '持股满10个交易日强制卖出'属于持仓时间计数逻辑，当前条件构建器不支持时间计数规则，建议在回测参数中设置最大持仓天数=10来实现，此处未建模。6.
+  '每次最多持股5只、选量比最大'属于资金管理与选股排序逻辑，条件构建器本身不支持持仓数量限制与信号强度排序，建议在回测引擎的仓位管理参数中设置最大持仓股票数=5，并开启'量比从大到小'排序优先买入。
