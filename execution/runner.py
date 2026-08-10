@@ -105,16 +105,20 @@ class LiveRunner:
         self.strategy_id = strategy_id
         self.strategy_params = strategy_params or {}
         self.tick_seconds = max(5, int(tick_seconds))
-        self.broker_kind = broker_kind
         self.broker_config = broker_config or {}
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self.portfolio = pfolio.load_or_create(account)
-        if broker_kind == "qmt":
+        # 账户 kind 决定 broker：live 账户强制走 qmt；paper 账户强制走 paper。
+        # 老的 broker_kind 参数只在账户不存在时用作新账户默认。
+        if getattr(self.portfolio, "kind", "paper") == "live":
+            broker_kind = "qmt"
             from execution.qmt_broker import QMTBroker
             self.broker = QMTBroker(account=account, broker_config=self.broker_config)
         else:
+            broker_kind = "paper"
             self.broker = PaperBroker(self.portfolio, account=account)
+        self.broker_kind = broker_kind
         self.state = RunnerState(
             account=account,
             watch_symbols=self.watch_symbols,

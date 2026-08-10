@@ -54,23 +54,44 @@ def test_from_qmt_symbol():
     assert _from_qmt_symbol("000001.SZ") == "000001"
 
 
-def test_runner_accepts_broker_kind(monkeypatch, tmp_path):
-    """LiveRunner(broker_kind='qmt') 能正确构造，不真连。"""
+def test_runner_broker_follows_account_kind_live(monkeypatch, tmp_path):
+    """账户 kind=live 时，runner 自动选择 QMTBroker，忽略传入的 broker_kind。"""
     from execution import runner as rn
+    from paper_trade.portfolio import Portfolio
+
     monkeypatch.setattr(rn, "STATE_DIR", tmp_path)
     monkeypatch.setattr(rn.pfolio, "default_path",
                         lambda a: tmp_path / f"{a}.json")
-    # 让 QMT SDK 不可用（避免真实连接）
     from execution import qmt_broker
     monkeypatch.setattr(qmt_broker, "_try_import_xtquant",
                         lambda: {"error": "test"})
 
+    # 先存一个 live 账户
+    port = Portfolio.new("live_acct", initial_cash=100000, kind="live")
+    port.save(tmp_path / "live_acct.json")
+
     r = rn.LiveRunner(
-        account="qmt_route_test",
-        broker_kind="qmt",
+        account="live_acct",
         broker_config={"account_id": "88888888", "user_data_path": "/tmp"},
     )
     assert r.broker_kind == "qmt"
-    assert r.state.broker_kind == "qmt"
     from execution.qmt_broker import QMTBroker
     assert isinstance(r.broker, QMTBroker)
+
+
+def test_runner_broker_follows_account_kind_paper(monkeypatch, tmp_path):
+    """账户 kind=paper（默认）时，runner 自动选择 PaperBroker。"""
+    from execution import runner as rn
+    from execution.broker import PaperBroker
+    from paper_trade.portfolio import Portfolio
+
+    monkeypatch.setattr(rn, "STATE_DIR", tmp_path)
+    monkeypatch.setattr(rn.pfolio, "default_path",
+                        lambda a: tmp_path / f"{a}.json")
+
+    port = Portfolio.new("paper_acct", initial_cash=100000, kind="paper")
+    port.save(tmp_path / "paper_acct.json")
+
+    r = rn.LiveRunner(account="paper_acct")
+    assert r.broker_kind == "paper"
+    assert isinstance(r.broker, PaperBroker)

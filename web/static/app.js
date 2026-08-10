@@ -774,6 +774,8 @@ async function loadAccount() {
   if (!name) return alert('请输入账户名');
   try {
     const p = await API(`/portfolio/${name}`);
+    window._currentAcctKind = p.kind || 'paper';
+    updateEngineModeIndicator();
     renderAccount(p);
   } catch (e) {
     document.getElementById('acct-view').innerHTML = `<span class="text-amber-600">账户 <b>${name}</b> 未找到，可点"新建账户"</span>`;
@@ -782,13 +784,44 @@ async function loadAccount() {
 }
 window.loadAccount = loadAccount;
 
-async function newAccount() {
+// 根据当前账户 kind，更新引擎面板的类型提示 + QMT 面板显示
+function updateEngineModeIndicator() {
+  const kind = window._currentAcctKind || 'paper';
+  const el = document.getElementById('live-mode-indicator');
+  const qmtPanel = document.getElementById('live-qmt-panel');
+  if (kind === 'live') {
+    el.innerHTML = '<span class="text-red-700 font-medium">💰 实盘账户</span> · 引擎启动后所有委托将真实发往券商';
+    qmtPanel.classList.remove('hidden');
+    // 拉一下 QMT SDK 状态
+    API('/live/qmt/status').then(r => {
+      const parts = [];
+      parts.push(r.sdk_installed ? '✓ xtquant SDK 已安装' : `✗ xtquant 未安装：${(r.sdk_error||'').slice(0,80)}`);
+      parts.push(r.account_id_configured ? '✓ 账号已配置' : '· 账号未配置（可在此处输入）');
+      parts.push(r.user_data_path_configured ? '✓ 路径已配置' : '· 路径未配置（可在此处输入）');
+      document.getElementById('live-qmt-status').innerHTML = parts.join('　');
+    }).catch(() => {});
+  } else {
+    el.innerHTML = '<span class="text-emerald-700 font-medium">🧪 模拟账户</span> · 本地撮合，无真实资金风险';
+    qmtPanel.classList.add('hidden');
+  }
+}
+window.updateEngineModeIndicator = updateEngineModeIndicator;
+
+async function newAccount(kind) {
+  kind = kind || 'paper';
   const name = document.getElementById('acct-name').value.trim();
   const cash = parseFloat(document.getElementById('acct-cash').value) || 100000;
   if (!name) return alert('请输入账户名');
+  if (kind === 'live') {
+    if (!confirm(`确定新建【实盘账户】${name}？\n\n实盘账户启动引擎后所有委托将真实发往券商柜台。请确保：\n· 已在券商开通量化交易权限\n· 已理解风险且愿意承担实盘亏损`)) return;
+  }
   try {
-    const r = await API('/portfolio/new', { method: 'POST', body: JSON.stringify({ account_id: name, initial_cash: cash }) });
+    const r = await API('/portfolio/new', {
+      method: 'POST',
+      body: JSON.stringify({ account_id: name, initial_cash: cash, kind }),
+    });
     renderAccount(r.account);
+    loadAccountList();
   } catch (e) {
     alert('失败: ' + e.message);
   }
@@ -797,22 +830,20 @@ async function newAccount() {
 window.newAccount = newAccount;
 
 async function loadAccountList() {
-  const wrap = document.getElementById('acct-list');
-  if (!wrap) return;
+  const paperWrap = document.getElementById('acct-list-paper');
+  const liveWrap = document.getElementById('acct-list-live');
+  if (!paperWrap || !liveWrap) return;
   try {
     const r = await API('/portfolio');
     const list = r.accounts || [];
-    if (!list.length) {
-      wrap.innerHTML = '<div class="col-span-full text-xs text-slate-400 py-4 text-center border border-dashed border-slate-200 rounded">暂无账户，在下方新建一个</div>';
-      return;
-    }
     const current = document.getElementById('acct-name').value.trim();
-    wrap.innerHTML = list.map(a => {
+
+    const renderOne = (a) => {
       const active = a.account_id === current;
       const engineOk = a.engine.status === 'running';
       const pnlCls = a.pnl_pct >= 0 ? 'text-red-600' : 'text-emerald-600';
       return `
-        <div class="border ${active ? 'border-blue-500 bg-blue-50' : 'border-slate-200 bg-white'} rounded-lg p-3 hover:shadow-md transition cursor-pointer"
+        <div class="border ${active ? 'border-blue-500 bg-blue-50' : 'border-slate-200 bg-white'} rounded p-2 hover:shadow transition cursor-pointer"
              onclick="switchAccount('${a.account_id}')">
           <div class="flex items-center gap-2 mb-1">
             <span class="font-semibold text-sm">${a.account_id}</span>
@@ -821,18 +852,24 @@ async function loadAccountList() {
               ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">⚡ ${a.engine.strategy_id||'手动'}</span>`
               : '<span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">引擎停</span>'}
           </div>
-          <div class="text-xs text-slate-500 flex justify-between mt-1">
+          <div class="text-xs text-slate-500 flex justify-between">
             <span>总值 ¥${a.total_value.toLocaleString(undefined,{maximumFractionDigits:0})}</span>
             <span class="${pnlCls} font-medium">${a.pnl_pct>=0?'+':''}${a.pnl_pct.toFixed(2)}%</span>
           </div>
-          <div class="text-[11px] text-slate-400 mt-1">
+          <div class="text-[11px] text-slate-400 mt-0.5">
             现金 ¥${a.cash.toLocaleString(undefined,{maximumFractionDigits:0})} · 持仓 ${a.n_positions} · 成交 ${a.n_trades}
           </div>
         </div>
       `;
-    }).join('');
+    };
+    const empty = (label) => `<div class="text-xs text-slate-400 py-3 text-center border border-dashed rounded">${label}</div>`;
+    const papers = list.filter(a => a.kind === 'paper');
+    const lives  = list.filter(a => a.kind === 'live');
+    paperWrap.innerHTML = papers.length ? papers.map(renderOne).join('') : empty('暂无模拟账户，点下方 🧪 新建');
+    liveWrap.innerHTML  = lives.length  ? lives.map(renderOne).join('')  : empty('暂无实盘账户，点下方 💰 新建');
   } catch (e) {
-    wrap.innerHTML = `<div class="col-span-full text-xs text-red-500">加载失败: ${e.message}</div>`;
+    paperWrap.innerHTML = `<div class="text-xs text-red-500">加载失败: ${e.message}</div>`;
+    liveWrap.innerHTML = '';
   }
 }
 window.loadAccountList = loadAccountList;
@@ -2167,12 +2204,15 @@ async function loadLiveStrategies() {
 }
 
 async function startLive() {
-  const account = document.getElementById('acct-name').value.trim() || 'live_default';
+  const account = document.getElementById('acct-name').value.trim();
+  if (!account) { alert('请先选一个账户'); return; }
   const tick = parseInt(document.getElementById('live-tick').value) || 15;
   const strategyId = document.getElementById('live-strategy').value || null;
   const symbols = document.getElementById('live-symbols').value
     .split(/[,，\s]+/).map(s => s.trim()).filter(Boolean);
-  const brokerKind = document.querySelector('input[name="live-broker-kind"]:checked')?.value || 'paper';
+  // 从当前账户 kind 决定 broker_kind：live → qmt，paper → paper
+  const acctKind = window._currentAcctKind || 'paper';
+  const brokerKind = acctKind === 'live' ? 'qmt' : 'paper';
 
   const body = {
     account, tick_seconds: tick,

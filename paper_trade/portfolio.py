@@ -85,6 +85,9 @@ class Portfolio:
     positions: dict[str, Position] = field(default_factory=dict)
     trades: list[Trade] = field(default_factory=list)
     daily_snapshots: list[Snapshot] = field(default_factory=list)
+    # "paper" = 模拟账户（本地撮合）；"live" = 实盘账户（走 QMT 等券商）
+    # 创建后固定不改。老账户读盘时若无此字段，默认视为 paper 保持兼容。
+    kind: str = "paper"
 
     # ---- 序列化 ----
     def to_dict(self) -> dict:
@@ -95,6 +98,7 @@ class Portfolio:
             "positions": {s: asdict(p) for s, p in self.positions.items()},
             "trades": [asdict(t) for t in self.trades],
             "daily_snapshots": [asdict(s) for s in self.daily_snapshots],
+            "kind": self.kind,
         }
 
     @classmethod
@@ -106,6 +110,7 @@ class Portfolio:
             positions={s: Position(**p) for s, p in d.get("positions", {}).items()},
             trades=[Trade(**t) for t in d.get("trades", [])],
             daily_snapshots=[Snapshot(**s) for s in d.get("daily_snapshots", [])],
+            kind=d.get("kind", "paper"),   # 老账户无字段 → paper
         )
 
     def save(self, path: str | Path) -> None:
@@ -142,8 +147,12 @@ class Portfolio:
         return snap
 
     @classmethod
-    def new(cls, account_id: str, initial_cash: float = 100_000.0) -> "Portfolio":
-        return cls(account_id=account_id, initial_cash=initial_cash, cash=initial_cash)
+    def new(cls, account_id: str, initial_cash: float = 100_000.0,
+            kind: str = "paper") -> "Portfolio":
+        if kind not in ("paper", "live"):
+            raise ValueError(f"kind 必须是 paper 或 live，收到 {kind!r}")
+        return cls(account_id=account_id, initial_cash=initial_cash,
+                   cash=initial_cash, kind=kind)
 
     # ---- 事件驱动式操作（M9 live_paper 用）----
     def apply_buy(self, symbol: str, shares: int, price: float, fee: float,
@@ -194,9 +203,10 @@ def default_path(account_id: str) -> Path:
     return _PROJECT_ROOT / "logs" / "portfolio" / f"{account_id}.json"
 
 
-def load_or_create(account_id: str, initial_cash: float = 100_000.0) -> Portfolio:
-    """加载已存在的账户，或新建一个。"""
+def load_or_create(account_id: str, initial_cash: float = 100_000.0,
+                   kind: str = "paper") -> Portfolio:
+    """加载已存在的账户，或新建一个（新建时使用 kind；已存在则忽略 kind）。"""
     p = default_path(account_id)
     if p.exists():
         return Portfolio.load(p)
-    return Portfolio.new(account_id, initial_cash)
+    return Portfolio.new(account_id, initial_cash, kind=kind)

@@ -292,13 +292,24 @@
         引擎开启后每 <span id="live-tick-display">15</span>s 拉快照撮合，只在交易时段（9:30-11:30 / 13:00-15:00）真实下单。刷新页面不丢。
       </p>
 
-      <!-- 已有账户列表（点击切换/删除） -->
-      <div id="acct-list-wrap" class="mb-4">
-        <div class="flex items-center justify-between mb-2">
-          <div class="text-sm font-medium text-slate-700">已有账户 · 点击卡片切换</div>
-          <button onclick="loadAccountList()" class="text-xs text-slate-400 hover:text-slate-700">🔄 刷新列表</button>
+      <!-- 已有账户：模拟 vs 实盘 并列展示 -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+        <!-- 模拟账户区 -->
+        <div class="border-2 border-emerald-100 bg-emerald-50/30 rounded-lg p-3">
+          <div class="flex items-center justify-between mb-2">
+            <div class="text-sm font-semibold text-emerald-800">🧪 模拟账户</div>
+            <button onclick="loadAccountList()" class="text-xs text-slate-400 hover:text-slate-700">🔄</button>
+          </div>
+          <div id="acct-list-paper" class="grid grid-cols-1 gap-2 mb-2 min-h-[40px]"></div>
         </div>
-        <div id="acct-list" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2"></div>
+        <!-- 实盘账户区 -->
+        <div class="border-2 border-red-100 bg-red-50/30 rounded-lg p-3">
+          <div class="flex items-center justify-between mb-2">
+            <div class="text-sm font-semibold text-red-800">💰 实盘账户（QMT）</div>
+            <button onclick="loadAccountList()" class="text-xs text-slate-400 hover:text-slate-700">🔄</button>
+          </div>
+          <div id="acct-list-live" class="grid grid-cols-1 gap-2 mb-2 min-h-[40px]"></div>
+        </div>
       </div>
 
       <!-- 新建 & 当前账户操作 -->
@@ -312,9 +323,10 @@
             <div class="label">初始资金 ¥</div>
             <input id="acct-cash" type="number" value="100000" class="field w-32">
           </div>
-          <button onclick="newAccount()" class="btn btn-primary">➕ 新建账户</button>
+          <button onclick="newAccount('paper')" class="btn btn-primary">🧪 新建模拟账户</button>
+          <button onclick="newAccount('live')" class="btn text-white" style="background:#dc2626">💰 新建实盘账户</button>
           <button onclick="loadAccount()" class="btn btn-ghost">查看账户</button>
-          <button onclick="runPaper()" id="paper-btn" class="btn btn-ghost">日频跑一次</button>
+          <button onclick="runPaper()" id="paper-btn" class="btn btn-ghost hidden">日频跑一次</button>
           <button onclick="deleteAccount()" class="btn btn-ghost text-red-600 ml-auto">🗑 删除当前账户</button>
         </div>
       </div>
@@ -325,20 +337,12 @@
           ⚡ 实时引擎（每个账户独立引擎，可随时启动/停止/换策略）
         </summary>
 
-        <!-- 交易模式：模拟盘 / 实盘 -->
-        <div class="mt-3 flex items-center gap-2 flex-wrap">
-          <span class="text-sm font-medium text-slate-700">交易模式：</span>
-          <label class="flex items-center gap-1 text-sm cursor-pointer">
-            <input type="radio" name="live-broker-kind" value="paper" checked onchange="onBrokerKindChange()">
-            <span>🧪 模拟盘（本地撮合，无真金白银）</span>
-          </label>
-          <label class="flex items-center gap-1 text-sm cursor-pointer">
-            <input type="radio" name="live-broker-kind" value="qmt" onchange="onBrokerKindChange()">
-            <span>💰 实盘（国金/华泰/东财 QMT）</span>
-          </label>
+        <!-- 当前账户类型指示（由账户 kind 决定，不给单独 radio 选） -->
+        <div id="live-mode-indicator" class="mt-3 text-sm text-slate-500">
+          请先在上方选一个账户；引擎类型由账户类型（🧪 模拟 / 💰 实盘）自动决定。
         </div>
 
-        <!-- 实盘专属：QMT 配置 + 风险提示 -->
+        <!-- 实盘专属：QMT 配置 + 风险提示（选中实盘账户后自动展开） -->
         <div id="live-qmt-panel" class="hidden mt-3 p-3 bg-red-50 border border-red-200 rounded-lg">
           <div class="text-sm font-semibold text-red-800 mb-2">
             ⚠️ 实盘模式 · 所有委托将真实发往券商柜台

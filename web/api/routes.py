@@ -122,6 +122,7 @@ class BacktestRequest(BaseModel):
 class NewPortfolioRequest(BaseModel):
     account_id: str
     initial_cash: float = 100_000
+    kind: str = Field("paper", description="paper=模拟账户 · live=实盘账户（走 QMT）")
 
 
 class NotifyTestRequest(BaseModel):
@@ -340,16 +341,21 @@ def delete_portfolio(account: str):
 @router.post("/portfolio/new", summary="新建账户")
 def new_portfolio(req: NewPortfolioRequest):
     from paper_trade import portfolio as pfolio
+    if req.kind not in ("paper", "live"):
+        raise HTTPException(400, f"kind 必须是 paper 或 live，收到 {req.kind!r}")
     p = pfolio.default_path(req.account_id)
     if p.exists():
         raise HTTPException(409, f"账户 {req.account_id} 已存在")
-    port = pfolio.Portfolio.new(req.account_id, req.initial_cash)
+    port = pfolio.Portfolio.new(req.account_id, req.initial_cash, kind=req.kind)
     port.save(p)
     return {"ok": True, "path": str(p), "account": port.to_dict()}
 
 
 @router.get("/portfolio", summary="列出所有账户（附余额、持仓、引擎状态）")
-def list_portfolios():
+def list_portfolios(kind: Optional[str] = None):
+    """
+    kind 可选 paper / live，用于前端左右两卡分别拉取。不填返回全部。
+    """
     from paper_trade import portfolio as pfolio
     from execution.runner import RunnerState
 
@@ -363,6 +369,9 @@ def list_portfolios():
             port = pfolio.Portfolio.load(f)
         except Exception:
             continue
+        acct_kind = getattr(port, "kind", "paper")
+        if kind and acct_kind != kind:
+            continue
         total = port.cash + sum(
             p.shares * (p.last_price or p.avg_cost) for p in port.positions.values()
         )
@@ -370,6 +379,7 @@ def list_portfolios():
         state = RunnerState.load(port.account_id)
         items.append({
             "account_id": port.account_id,
+            "kind": acct_kind,
             "initial_cash": port.initial_cash,
             "cash": round(port.cash, 2),
             "total_value": round(total, 2),
@@ -382,6 +392,7 @@ def list_portfolios():
                 "strategy_id": state.strategy_id if state else None,
                 "tick_seconds": state.tick_seconds if state else None,
                 "last_tick_at": state.last_tick_at if state else None,
+                "broker_kind": state.broker_kind if state else None,
             },
         })
     return {"accounts": items}
