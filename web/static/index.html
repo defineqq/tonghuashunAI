@@ -347,21 +347,46 @@
           <div class="text-sm font-semibold text-red-800 mb-2">
             ⚠️ 实盘模式 · 所有委托将真实发往券商柜台
           </div>
+
+          <details class="mb-3 text-xs text-red-800">
+            <summary class="cursor-pointer font-semibold">📖 关于"选券商"和"密码"（点击展开）</summary>
+            <div class="mt-2 pl-3 leading-relaxed">
+              <p><b>不需要在这里选券商，也不需要输入密码。</b></p>
+              <p>QMT 是券商发给你的桌面客户端。你选券商就是"去哪家开 QMT 账户"这件业务上的决定：</p>
+              <ul class="list-disc list-inside mt-1">
+                <li>国金 / 华泰 / 东财 / 银河 / 中信 等券商都支持 QMT</li>
+                <li>你在选好的券商开量化权限，他们会发一份带自家品牌的 miniQMT.exe</li>
+              </ul>
+              <p class="mt-2"><b>密码在哪儿输？</b>在你启动 miniQMT.exe 桌面客户端时输入交易密码，登录成功后 QMT 客户端会在后台一直挂着。</p>
+              <p class="mt-2"><b>本项目做什么？</b>通过 xtquant SDK 连接到你本机已登录的 miniQMT 客户端。所以只需要下面两个字段：</p>
+              <ul class="list-disc list-inside mt-1">
+                <li><b>QMT 资金账号</b>：你的证券账户号（券商在开户时给你的号，不是密码）</li>
+                <li><b>userdata_mini 路径</b>：miniQMT.exe 安装目录下那个叫 <code>userdata_mini</code> 的文件夹</li>
+              </ul>
+            </div>
+          </details>
+
           <div class="text-xs text-red-700 leading-relaxed mb-3">
             前置条件：<br>
-            1) 已在国金/华泰/东财等券商开通量化交易权限（一般要求账户 ≥ 50 万）<br>
-            2) miniQMT.exe 客户端已启动并登录（同机器上运行）<br>
+            1) 已在券商开通量化交易权限（一般要求账户 ≥ 50 万）<br>
+            2) miniQMT.exe 桌面客户端已在同一台电脑上启动并登录（这一步用你的交易密码）<br>
             3) <code>pip install xtquant</code>（一般随 miniQMT 客户端已附带）<br>
             <b>强烈建议先跑券商仿真账户 1 个月，确认无异常再上真钱。</b>
           </div>
           <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div>
-              <div class="label text-xs">QMT 资金账号</div>
-              <input id="live-qmt-account" type="text" placeholder="88888888（国金资金账号）" class="field text-sm">
+              <div class="label text-xs">
+                QMT 资金账号
+                <span class="text-[10px] text-slate-400 font-normal">证券账号，不是密码</span>
+              </div>
+              <input id="live-qmt-account" type="text" placeholder="如 88888888（券商开户时给的号）" class="field text-sm">
             </div>
             <div>
-              <div class="label text-xs">userdata_mini 路径</div>
-              <input id="live-qmt-userdata" type="text" placeholder="C:/QMT/userdata_mini" class="field text-sm">
+              <div class="label text-xs">
+                userdata_mini 路径
+                <span class="text-[10px] text-slate-400 font-normal">miniQMT 安装目录下的子目录</span>
+              </div>
+              <input id="live-qmt-userdata" type="text" placeholder="如 C:/gj_qmt/userdata_mini" class="field text-sm">
             </div>
           </div>
           <div id="live-qmt-status" class="mt-2 text-xs text-red-600"></div>
